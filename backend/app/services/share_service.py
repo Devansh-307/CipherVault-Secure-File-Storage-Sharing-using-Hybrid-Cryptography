@@ -67,9 +67,9 @@ class ShareService:
             if not clean_id:
                 continue
 
-            # Query by username or email
+            # Query by username or email (case-insensitive)
             recipient = db.query(User).filter(
-                (User.username == clean_id) | (User.email == clean_id.lower())
+                (User.username.ilike(clean_id)) | (User.email.ilike(clean_id.lower()))
             ).first()
 
             if not recipient:

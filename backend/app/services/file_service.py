@@ -188,23 +188,26 @@ class FileService:
                 )
 
             # Check expiration
-            if share_record.expires_at and share_record.expires_at < datetime.utcnow():
-                AuditService.log_event(
-                    db=db,
-                    action="SHARE_EXPIRED_ACCESS_DENIED",
-                    user_id=user.id,
-                    username=user.username,
-                    target_type="SHARE",
-                    target_id=share_record.id,
-                    status="WARNING",
-                    ip_address=ip_address,
-                    user_agent=user_agent,
-                    details=f"Access denied: Time-bound share link for file '{file_record.original_filename}' has expired."
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="This shared file access link has expired."
-                )
+            if share_record.expires_at:
+                now_utc = datetime.now(timezone.utc)
+                exp_utc = share_record.expires_at if share_record.expires_at.tzinfo else share_record.expires_at.replace(tzinfo=timezone.utc)
+                if exp_utc < now_utc:
+                    AuditService.log_event(
+                        db=db,
+                        action="SHARE_EXPIRED_ACCESS_DENIED",
+                        user_id=user.id,
+                        username=user.username,
+                        target_type="SHARE",
+                        target_id=share_record.id,
+                        status="WARNING",
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                        details=f"Access denied: Time-bound share link for file '{file_record.original_filename}' has expired."
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="This shared file access link has expired."
+                    )
 
             encrypted_key_b64 = share_record.encrypted_session_key
 
@@ -366,7 +369,7 @@ class FileService:
 
         StorageService.tamper_ciphertext(file_record.stored_path, mode=mode)
         file_record.is_tampered = True
-        file_record.tampered_at = datetime.utcnow()
+        file_record.tampered_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(file_record)
 

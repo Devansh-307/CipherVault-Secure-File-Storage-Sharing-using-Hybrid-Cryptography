@@ -42,8 +42,13 @@ async def upload_and_encrypt_file(
         try:
             names = json.loads(recipient_usernames) if recipient_usernames.startswith("[") else [n.strip() for n in recipient_usernames.split(",") if n.strip()]
             for name in names:
-                u = db.query(User).filter(User.username == name).first()
-                if u and u.id != current_user.id:
+                clean_name = name.strip()
+                if not clean_name:
+                    continue
+                u = db.query(User).filter(
+                    (User.username.ilike(clean_name)) | (User.email.ilike(clean_name.lower()))
+                ).first()
+                if u and u.id != current_user.id and u not in recipients_list:
                     recipients_list.append(u)
         except Exception:
             pass
