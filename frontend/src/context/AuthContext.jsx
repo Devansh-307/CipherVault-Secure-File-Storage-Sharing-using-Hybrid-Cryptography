@@ -70,6 +70,17 @@ export const AuthProvider = ({ children }) => {
     showToast(`Removed @${username} from saved accounts.`, 'info');
   };
 
+  const clearAllSavedAccounts = () => {
+    localStorage.removeItem('ciphervault_saved_accounts');
+    localStorage.removeItem('ciphervault_token');
+    localStorage.removeItem('ciphervault_user');
+    sessionStorage.removeItem('current_master_key');
+    setSavedAccounts(DEFAULT_SAVED_ACCOUNTS);
+    setUser(null);
+    setMasterPassword('');
+    showToast('All saved login info and cached data have been erased.', 'info', 'Cache Cleared');
+  };
+
   useEffect(() => {
     const handleUnauthorized = () => {
       setUser(null);
@@ -147,6 +158,7 @@ export const AuthProvider = ({ children }) => {
         masterPassword,
         savedAccounts,
         removeSavedAccount,
+        clearAllSavedAccounts,
         saveCachedPassword,
         login,
         register,

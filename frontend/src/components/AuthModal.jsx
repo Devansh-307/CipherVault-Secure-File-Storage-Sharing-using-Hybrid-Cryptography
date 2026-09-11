@@ -41,7 +41,7 @@ export const AuthModal = () => {
   const [otpSent, setOtpSent] = useState(false);
   const [otpDebugCode, setOtpDebugCode] = useState('');
 
-  const { login, register, savedAccounts, removeSavedAccount } = useAuth();
+  const { login, register, savedAccounts, removeSavedAccount, clearAllSavedAccounts } = useAuth();
   const { showToast } = useToast();
 
   // Login form state
@@ -359,9 +359,23 @@ export const AuthModal = () => {
               <div className="mb-5 p-3 rounded-xl bg-slate-900/80 border border-slate-800">
                 <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
-                    <History className="w-3.5 h-3.5 text-sky-400" /> Saved Accounts on this Device
+                    <History className="w-3.5 h-3.5 text-sky-400" /> Saved Accounts
                   </span>
-                  <span className="text-[10px] text-slate-500">{savedAccounts.length} ready</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm("Erase all saved login accounts and cached form data?")) {
+                          clearAllSavedAccounts();
+                        }
+                      }}
+                      className="text-[10px] text-rose-400 hover:text-rose-300 hover:underline flex items-center gap-1 transition"
+                      title="Erase all saved login info"
+                    >
+                      <Trash2 className="w-3 h-3" /> Clear Info
+                    </button>
+                    <span className="text-[10px] text-slate-500 font-mono">({savedAccounts.length})</span>
+                  </div>
                 </div>
 
                 <div className="flex gap-2 overflow-x-auto pb-1.5 scrollbar-thin">
@@ -371,7 +385,7 @@ export const AuthModal = () => {
                       <div
                         key={acc.username}
                         onClick={() => handleQuickSelectAccount(acc)}
-                        className={`flex-shrink-0 cursor-pointer p-2 rounded-lg border transition text-left flex items-center gap-2.5 pr-3 ${
+                        className={`group flex-shrink-0 cursor-pointer p-2 rounded-lg border transition text-left flex items-center gap-2 pr-2 ${
                           isSelected
                             ? 'bg-sky-500/15 border-sky-500/50 text-white'
                             : 'bg-slate-800/60 border-slate-700/60 hover:bg-slate-800 text-slate-300'
@@ -384,7 +398,18 @@ export const AuthModal = () => {
                           <div className="text-xs font-semibold leading-tight">{acc.full_name || acc.username}</div>
                           <div className="text-[10px] text-sky-400 mono">@{acc.username}</div>
                         </div>
-                        {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400 ml-1" />}
+                        {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400 ml-0.5" />}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeSavedAccount(acc.username);
+                          }}
+                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-700/50 transition opacity-60 group-hover:opacity-100"
+                          title={`Remove @${acc.username}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       </div>
                     );
                   })}

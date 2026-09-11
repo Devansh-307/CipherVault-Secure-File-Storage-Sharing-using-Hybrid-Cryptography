@@ -17,6 +17,16 @@ from app.services.file_service import FileService
 
 def seed_database():
     print("=== Initializing CipherVault Database and Seed Data ===")
+    
+    # Clean storage folder
+    storage_dir = BASE_DIR / "storage"
+    if storage_dir.exists():
+        for item in storage_dir.glob("*.enc"):
+            try:
+                item.unlink()
+            except Exception:
+                pass
+
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     
