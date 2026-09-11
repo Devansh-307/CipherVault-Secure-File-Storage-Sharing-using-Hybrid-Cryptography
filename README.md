@@ -5,8 +5,10 @@
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com)
 [![Cryptography: AES-256-GCM](https://img.shields.io/badge/Crypto-AES--256--GCM%20%7C%20RSA--2048%20OAEP-blueviolet.svg)](https://cryptography.io)
-[![NIST SP 800-38D](https://img.shields.io/badge/Compliance-NIST%20SP%20800--38D%20%7C%20FIPS%20180--4-success.svg)](https://csrc.nist.gov)
-[![Tests: 100% Passed](https://img.shields.io/badge/Tests-13%2F13%20Passed-brightgreen.svg)](https://pytest.org)
+[![Tests: 14/14 Passed](https://img.shields.io/badge/Tests-14%2F14%20Passed-brightgreen.svg)](https://pytest.org)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Devansh-307/CipherVault-Secure-File-Storage-Sharing-using-Hybrid-Cryptography)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/new?template=https%3A%2F%2Fgithub.com%2FDevansh-307%2FCipherVault-Secure-File-Storage-Sharing-using-Hybrid-Cryptography)
 
 An **industry-level, high-performance secure cloud storage and multi-user file sharing system** built with a **Hybrid Cryptographic Architecture** and a **Modern React + Tailwind CSS Web Dashboard**. It unifies the hardware-accelerated throughput of **AES-256-GCM** authenticated symmetric encryption with the zero-trust key distribution security of **RSA-2048/4096 OAEP** asymmetric key encapsulation, backed by **SHA-256** immutable integrity digests and **RSA-PSS** digital signatures for non-repudiation.
 
