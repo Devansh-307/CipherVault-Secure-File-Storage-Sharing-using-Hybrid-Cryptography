@@ -1,0 +1,33 @@
+services:
+  ciphervault:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ciphervault-app
+    image: ciphervault:latest
+    restart: unless-stopped
+    ports:
+      # Defaults to host port 8000. 
+      # If port 8000 is used by your other project, set CIPHERVAULT_PORT=8080 or any free port in .env
+      - "${CIPHERVAULT_PORT:-8000}:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - PROJECT_NAME=CipherVault - Hybrid Cryptography Storage
+    volumes:
+      # Isolated named volumes ensuring no conflict with host files or other containers
+      - ciphervault_storage:/app/backend/storage
+      - ciphervault_data:/app/backend/data
+    networks:
+      - ciphervault_net
+
+volumes:
+  ciphervault_storage:
+    name: ciphervault_storage
+  ciphervault_data:
+    name: ciphervault_data
+
+networks:
+  ciphervault_net:
+    name: ciphervault_net
+    driver: bridge
