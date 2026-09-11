@@ -1,5 +1,5 @@
 import base64
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status

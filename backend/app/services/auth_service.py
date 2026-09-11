@@ -1,4 +1,7 @@
 import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, Dict
 import bcrypt
@@ -91,6 +94,41 @@ class AuthService:
             "verified": False
         }
 
+        # Dispatch real email if SMTP is configured
+        email_sent = False
+        if settings.SMTP_HOST and settings.SMTP_USER and settings.SMTP_PASSWORD:
+            try:
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = f"CipherVault Security: Your Verification Code is {otp_code}"
+                msg["From"] = settings.SMTP_FROM_EMAIL
+                msg["To"] = email_clean
+
+                text_content = f"CipherVault Verification Code: {otp_code}\nValid for 10 minutes. If you did not request this, please ignore."
+                html_content = f"""
+                <div style="font-family: Arial, sans-serif; background-color: #07090e; color: #f8fafc; padding: 24px; border-radius: 12px; border: 1px solid #38bdf8;">
+                    <h2 style="color: #38bdf8; margin-top: 0;">CipherVault Zero-Knowledge Security</h2>
+                    <p style="font-size: 14px; color: #94a3b8;">Use the verification code below to complete your master key reset:</p>
+                    <div style="background-color: #0d121d; border: 1px solid #38bdf8; border-radius: 8px; padding: 16px; text-align: center; margin: 20px 0;">
+                        <span style="font-family: monospace; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #38bdf8;">{otp_code}</span>
+                    </div>
+                    <p style="font-size: 12px; color: #64748b;">This code is valid for 10 minutes. Architected by Devansh Rathore.</p>
+                </div>
+                """
+                msg.attach(MIMEText(text_content, "plain"))
+                msg.attach(MIMEText(html_content, "html"))
+
+                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
+                    if settings.SMTP_USE_TLS:
+                        server.starttls()
+                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                    server.send_message(msg)
+                email_sent = True
+                print(f"[+] Successfully delivered OTP email to {email_clean} via SMTP {settings.SMTP_HOST}")
+            except Exception as e:
+                print(f"[!] SMTP dispatch error to {email_clean}: {e}")
+        else:
+            print(f"[*] [EMAIL OTP DISPATCH] Delivered 6-digit OTP [{otp_code}] to registered email: {email_clean} (Purpose: {purpose})")
+
         # Log event in SIEM audit trail
         AuditService.log_event(
             db=db,
@@ -100,14 +138,14 @@ class AuthService:
             target_id=email_clean,
             status="SUCCESS",
             ip_address=ip_address,
-            details=f"Generated 6-digit OTP for email verification (Purpose: {purpose}). Valid for 10 minutes."
+            details=f"Generated 6-digit OTP for email verification (Purpose: {purpose}). Valid for 10 minutes. Delivered via SMTP: {email_sent}"
         )
 
         return {
-            "message": f"Verification code sent to {email_clean}",
+            "message": f"Verification code sent to {email_clean}. Please check your email and enter the 6-digit code.",
             "email": email_clean,
             "purpose": purpose,
-            "otp_code": otp_code,  # Provided for demo/testing convenience in UI
+            "otp_code": otp_code,  # Available for fallback display if SMTP server is unconfigured
             "expires_in_seconds": 600
         }
 

@@ -30,8 +30,11 @@ export const AuthModal = () => {
   // Modes: 'login' | 'register' | 'forgot_password'
   const [authMode, setAuthMode] = useState('login');
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  // Independent eye-toggle password visibility states
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showRegPassword, setShowRegPassword] = useState(false);
+  const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
+  const [showForgotConfirmPassword, setShowForgotConfirmPassword] = useState(false);
 
   // Left showcase carousel slide index (0 to 3)
   const [showcaseSlide, setShowcaseSlide] = useState(0);
@@ -39,7 +42,6 @@ export const AuthModal = () => {
   // OTP state for password recovery
   const [otpSending, setOtpSending] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
-  const [otpDebugCode, setOtpDebugCode] = useState('');
 
   const { login, register, savedAccounts, removeSavedAccount, clearAllSavedAccounts } = useAuth();
   const { showToast } = useToast();
@@ -143,13 +145,10 @@ export const AuthModal = () => {
     }
     setOtpSending(true);
     try {
-      const res = await ApiService.sendOtp(forgotEmail.trim(), 'forgot_password');
+      await ApiService.sendOtp(forgotEmail.trim(), 'forgot_password');
       setOtpSent(true);
-      if (res.otp_code) {
-        setOtpDebugCode(res.otp_code);
-        setForgotOtp(res.otp_code); // Auto-fill for testing/demo convenience
-      }
-      showToast(`Verification code sent to ${forgotEmail}!`, 'success', 'OTP Dispatched');
+      setForgotOtp(''); // Clear input so user manually enters code received in email
+      showToast(`Verification code sent to ${forgotEmail}! Please check your email.`, 'success', 'OTP Dispatched');
     } catch (err) {
       showToast(err.message, 'error', 'Reset Code Failed');
     } finally {
@@ -159,7 +158,7 @@ export const AuthModal = () => {
 
   const handleForgotPasswordSubmit = async (e) => {
     e.preventDefault();
-    if (!forgotOtp || forgotOtp.length !== 6) {
+    if (!forgotOtp || forgotOtp.trim().length !== 6) {
       showToast('Please enter the 6-digit verification code sent to your email.', 'error');
       return;
     }
@@ -179,8 +178,8 @@ export const AuthModal = () => {
       setAuthMode('login');
       setLoginUsername(forgotEmail.trim());
       setLoginPassword(forgotNewPassword);
+      setForgotOtp('');
       setOtpSent(false);
-      setOtpDebugCode('');
     } catch (err) {
       showToast(err.message, 'error', 'Reset Failed');
     } finally {
@@ -191,7 +190,7 @@ export const AuthModal = () => {
   const switchMode = (mode) => {
     setAuthMode(mode);
     setOtpSent(false);
-    setOtpDebugCode('');
+    setForgotOtp('');
   };
 
   const showcaseSlides = [
@@ -461,7 +460,7 @@ export const AuthModal = () => {
                         <Lock className="w-4 h-4" />
                       </div>
                       <input
-                        type={showPassword ? 'text' : 'password'}
+                        type={showLoginPassword ? 'text' : 'password'}
                         required
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
@@ -470,11 +469,11 @@ export const AuthModal = () => {
                       />
                       <button
                         type="button"
-                        onClick={() => setShowPassword(!showPassword)}
+                        onClick={() => setShowLoginPassword(!showLoginPassword)}
                         className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
-                        title={showPassword ? 'Hide password' : 'Show password'}
+                        title={showLoginPassword ? 'Hide password' : 'Show password'}
                       >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
@@ -602,7 +601,7 @@ export const AuthModal = () => {
                       <Lock className="w-3.5 h-3.5" />
                     </div>
                     <input
-                      type={showPassword ? 'text' : 'password'}
+                      type={showRegPassword ? 'text' : 'password'}
                       required
                       value={regPassword}
                       onChange={(e) => setRegPassword(e.target.value)}
@@ -611,10 +610,10 @@ export const AuthModal = () => {
                     />
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() => setShowRegPassword(!showRegPassword)}
                       className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
                     >
-                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      {showRegPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 </div>
@@ -697,7 +696,7 @@ export const AuthModal = () => {
 
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">
-                    6-Digit Verification Code {otpSent && <span className="text-emerald-400 font-semibold">(Sent)</span>}
+                    6-Digit Verification Code {otpSent && <span className="text-emerald-400 font-semibold">(Sent to Email)</span>}
                   </label>
                   <input
                     type="text"
@@ -708,19 +707,13 @@ export const AuthModal = () => {
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 font-mono tracking-widest text-center focus:outline-none focus:border-sky-400"
                     placeholder="123456"
                   />
-                  {otpDebugCode && (
-                    <div className="text-[10px] text-emerald-400 mt-1 flex items-center justify-between">
-                      <span>Simulated Email OTP Code:</span>
-                      <span className="font-mono font-bold bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/40">{otpDebugCode}</span>
-                    </div>
-                  )}
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">New Master Password / Key</label>
                   <div className="relative">
                     <input
-                      type={showPassword ? 'text' : 'password'}
+                      type={showForgotNewPassword ? 'text' : 'password'}
                       required
                       value={forgotNewPassword}
                       onChange={(e) => setForgotNewPassword(e.target.value)}
@@ -729,10 +722,10 @@ export const AuthModal = () => {
                     />
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() => setShowForgotNewPassword(!showForgotNewPassword)}
                       className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
                     >
-                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      {showForgotNewPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 </div>
@@ -741,7 +734,7 @@ export const AuthModal = () => {
                   <label className="block text-xs font-medium text-slate-300 mb-1">Confirm New Master Key</label>
                   <div className="relative">
                     <input
-                      type={showConfirmPassword ? 'text' : 'password'}
+                      type={showForgotConfirmPassword ? 'text' : 'password'}
                       required
                       value={forgotConfirmPassword}
                       onChange={(e) => setForgotConfirmPassword(e.target.value)}
@@ -750,10 +743,10 @@ export const AuthModal = () => {
                     />
                     <button
                       type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      onClick={() => setShowForgotConfirmPassword(!showForgotConfirmPassword)}
                       className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
                     >
-                      {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      {showForgotConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 </div>

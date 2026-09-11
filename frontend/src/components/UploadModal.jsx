@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ShieldPlus, X, UploadCloud, ShieldCheck, Loader2, Search, Plus, Trash2 } from 'lucide-react';
+import { ShieldPlus, X, UploadCloud, ShieldCheck, Loader2, Search, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
 import { ApiService, formatBytes } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -11,6 +11,7 @@ export const UploadModal = ({ isOpen, onClose, onSuccess }) => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileHashPreview, setFileHashPreview] = useState('');
   const [password, setPassword] = useState(masterPassword || '');
+  const [showPassword, setShowPassword] = useState(false);
   const [recipients, setRecipients] = useState([]);
   const [selectedRecipients, setSelectedRecipients] = useState([]);
   const [customInput, setCustomInput] = useState('');
@@ -190,14 +191,24 @@ export const UploadModal = ({ isOpen, onClose, onSuccess }) => {
             <label className="block text-xs font-medium text-slate-300 mb-1">
               Master Password <span className="text-slate-500">(Unlocks RSA Private Key for PSS signing)</span>
             </label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
-              placeholder="Enter your master password"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full pl-3 pr-9 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                placeholder="Enter your master password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
           </div>
 
           {/* Recipient Selection */}

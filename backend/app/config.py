@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     
     # Security parameters
     PBKDF2_ITERATIONS: int = 100_000
+
+    # Email / SMTP Configuration (Optional: for live email dispatch)
+    SMTP_HOST: str = os.environ.get("SMTP_HOST", "")
+    SMTP_PORT: int = int(os.environ.get("SMTP_PORT", 587))
+    SMTP_USER: str = os.environ.get("SMTP_USER", "")
+    SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
+    SMTP_FROM_EMAIL: str = os.environ.get("SMTP_FROM_EMAIL", "security@ciphervault.io")
+    SMTP_USE_TLS: bool = True
     
     class Config:
         case_sensitive = True

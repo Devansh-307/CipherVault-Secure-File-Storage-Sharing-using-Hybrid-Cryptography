@@ -11,7 +11,9 @@ import {
   Link as LinkIcon, 
   Copy, 
   Check, 
-  Trash2 
+  Trash2,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { ApiService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -25,6 +27,7 @@ export const ShareModal = ({ isOpen, fileId, filename, onClose, onSuccess }) => 
   const [shareTab, setShareTab] = useState('directory');
 
   const [password, setPassword] = useState(masterPassword || '');
+  const [showPassword, setShowPassword] = useState(false);
   const [expiryHours, setExpiryHours] = useState('');
   const [recipients, setRecipients] = useState([]);
   const [selectedRecipients, setSelectedRecipients] = useState([]);
@@ -361,14 +364,24 @@ export const ShareModal = ({ isOpen, fileId, filename, onClose, onSuccess }) => 
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">Your Master Password</label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-indigo-400"
-                placeholder="Unlock session key"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-3 pr-9 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-indigo-400"
+                  placeholder="Unlock session key"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
             </div>
           </div>
 
