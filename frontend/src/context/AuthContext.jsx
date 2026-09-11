@@ -26,8 +26,14 @@ const getInitialSavedAccounts = () => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(() => {
-    const cached = localStorage.getItem('ciphervault_user');
-    return cached ? JSON.parse(cached) : null;
+    try {
+      const cached = localStorage.getItem('ciphervault_user');
+      return cached && cached !== 'undefined' && cached !== 'null' ? JSON.parse(cached) : null;
+    } catch (e) {
+      console.warn('Failed to parse cached user:', e);
+      localStorage.removeItem('ciphervault_user');
+      return null;
+    }
   });
   const [loading, setLoading] = useState(true);
   const [masterPassword, setMasterPassword] = useState(() => {
