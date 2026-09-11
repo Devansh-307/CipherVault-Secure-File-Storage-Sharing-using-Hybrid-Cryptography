@@ -30,6 +30,9 @@ def build_react_if_needed():
                 print("[!] You can build it manually by running 'npm install && npm run build' in frontend/\n")
 
 def main():
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 8000))
+
     print("=" * 78)
     print("   CIPHERVAULT - HYBRID CRYPTOGRAPHY SECURE FILE STORAGE & SHARING")
     print("   React 18  +  Tailwind CSS  +  FastAPI  +  AES-256-GCM  +  RSA-2048")
@@ -47,18 +50,19 @@ def main():
     build_react_if_needed()
 
     # 3. Start Uvicorn Server
-    print("[*] Starting CipherVault Server on http://127.0.0.1:8000 ...")
-    print("[*] React Cyber Dashboard:          http://127.0.0.1:8000")
-    print("[*] OpenAPI & Swagger Docs:         http://127.0.0.1:8000/docs")
-    print("[*] Vite Hot-Reload Dev Server:     cd frontend && npm run dev (http://127.0.0.1:5173)")
+    display_host = "localhost" if host == "0.0.0.0" else host
+    print(f"[*] Starting CipherVault Server on http://{display_host}:{port} ...")
+    print(f"[*] React Cyber Dashboard:          http://{display_host}:{port}")
+    print(f"[*] OpenAPI & Swagger Docs:         http://{display_host}:{port}/docs")
+    print(f"[*] Vite Hot-Reload Dev Server:     cd frontend && npm run dev (http://127.0.0.1:5173)")
     print("[*] Press Ctrl+C to terminate.")
     print("=" * 78)
 
     import uvicorn
     uvicorn.run(
         "app.main:app",
-        host="127.0.0.1",
-        port=8000,
+        host=host,
+        port=port,
         reload=False,
         app_dir=str(BACKEND_DIR)
     )
