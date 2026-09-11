@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ciphervault
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: HOST
+        value: 0.0.0.0
+      - key: PROJECT_NAME
+        value: CipherVault - Hybrid Cryptography Storage
+    healthCheckPath: /api/health
