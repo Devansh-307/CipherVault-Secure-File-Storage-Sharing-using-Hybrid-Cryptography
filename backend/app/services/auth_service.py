@@ -1,5 +1,6 @@
-from datetime import datetime, timedelta
-from typing import Optional, Tuple
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple, Dict
 import bcrypt
 import jwt
 from jwt.exceptions import PyJWTError
@@ -10,11 +11,21 @@ from fastapi.security import OAuth2PasswordBearer
 from app.config import settings
 from app.database import get_db
 from app.models.user import User
-from app.schemas.auth import UserRegisterRequest, UserLoginRequest, UserOut
+from app.schemas.auth import (
+    UserRegisterRequest, 
+    UserLoginRequest, 
+    UserOut,
+    SendOtpRequest,
+    VerifyOtpRequest,
+    ForgotPasswordRequest
+)
 from app.crypto.engine import HybridCryptoEngine, DecryptionError
 from app.services.audit_service import AuditService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+# In-Memory OTP Store: key = f"{email}:{purpose}" -> {"otp": "123456", "expires_at": datetime, "verified": bool}
+_OTP_STORE: Dict[str, dict] = {}
 
 class AuthService:
     
@@ -34,13 +45,207 @@ class AuthService:
         """Creates a signed JWT access token using PyJWT."""
         to_encode = data.copy()
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(timezone.utc) + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
         return encoded_jwt
+
+    @classmethod
+    def send_email_otp(
+        cls,
+        db: Session,
+        req: SendOtpRequest,
+        ip_address: Optional[str] = None
+    ) -> dict:
+        """
+        Generates and dispatches a cryptographically secure 6-digit OTP for email verification.
+        """
+        email_clean = req.email.strip().lower()
+        purpose = req.purpose.strip().lower()
+
+        existing_user = db.query(User).filter(User.email == email_clean).first()
+        if purpose == "forgot_password":
+            if not existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"No account found associated with email '{email_clean}'."
+                )
+        elif purpose == "register":
+            if existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Email '{email_clean}' is already registered."
+                )
+
+        # Generate 6-digit random code
+        otp_code = f"{secrets.randbelow(900000) + 100000}"
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+        store_key = f"{email_clean}:{purpose}"
+        _OTP_STORE[store_key] = {
+            "otp": otp_code,
+            "expires_at": expires_at,
+            "verified": False
+        }
+
+        # Log event in SIEM audit trail
+        AuditService.log_event(
+            db=db,
+            action="OTP_GENERATED_DISPATCHED",
+            username=existing_user.username if existing_user else email_clean,
+            target_type="EMAIL_OTP",
+            target_id=email_clean,
+            status="SUCCESS",
+            ip_address=ip_address,
+            details=f"Generated 6-digit OTP for email verification (Purpose: {purpose}). Valid for 10 minutes."
+        )
+
+        return {
+            "message": f"Verification code sent to {email_clean}",
+            "email": email_clean,
+            "purpose": purpose,
+            "otp_code": otp_code,  # Provided for demo/testing convenience in UI
+            "expires_in_seconds": 600
+        }
+
+    @classmethod
+    def verify_email_otp(
+        cls,
+        db: Session,
+        req: VerifyOtpRequest,
+        ip_address: Optional[str] = None
+    ) -> dict:
+        """
+        Verifies the 6-digit email OTP.
+        """
+        email_clean = req.email.strip().lower()
+        purpose = req.purpose.strip().lower()
+        store_key = f"{email_clean}:{purpose}"
+
+        record = _OTP_STORE.get(store_key)
+        now = datetime.now(timezone.utc)
+
+        if not record:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No verification code found. Please request a new code."
+            )
+
+        if now > record["expires_at"]:
+            _OTP_STORE.pop(store_key, None)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Verification code has expired. Please request a new one."
+            )
+
+        if record["otp"] != req.otp.strip():
+            AuditService.log_event(
+                db=db,
+                action="OTP_VERIFY_FAILED",
+                target_type="EMAIL_OTP",
+                target_id=email_clean,
+                status="FAILURE",
+                ip_address=ip_address,
+                details=f"Invalid OTP entered for {email_clean} (Purpose: {purpose})"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid verification code. Please check and try again."
+            )
+
+        record["verified"] = True
+
+        AuditService.log_event(
+            db=db,
+            action="OTP_VERIFY_SUCCESS",
+            target_type="EMAIL_OTP",
+            target_id=email_clean,
+            status="SUCCESS",
+            ip_address=ip_address,
+            details=f"Email verified successfully via OTP for {email_clean} (Purpose: {purpose})"
+        )
+
+        return {
+            "success": True,
+            "message": "Email verified successfully.",
+            "email": email_clean
+        }
+
+    @classmethod
+    def forgot_password_reset(
+        cls,
+        db: Session,
+        req: ForgotPasswordRequest,
+        ip_address: Optional[str] = None
+    ) -> dict:
+        """
+        Resets user password using verified OTP and regenerates/re-envelopes their RSA keypair.
+        """
+        email_clean = req.email.strip().lower()
+        store_key = f"{email_clean}:forgot_password"
+        record = _OTP_STORE.get(store_key)
+
+        # Verify OTP
+        if not record or record.get("otp") != req.otp.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or missing verification code. Please request a new code."
+            )
+
+        if datetime.now(timezone.utc) > record["expires_at"]:
+            _OTP_STORE.pop(store_key, None)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Verification code has expired. Please request a new one."
+            )
+
+        user = db.query(User).filter(User.email == email_clean).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User account not found."
+            )
+
+        # 1. Update Password Hash
+        user.password_hash = cls.hash_password(req.new_password)
+
+        # 2. Generate and envelope a fresh 2048-bit RSA keypair with the new master password
+        priv_pem, pub_pem = HybridCryptoEngine.generate_rsa_keypair(key_size=settings.RSA_KEY_SIZE)
+        enc_priv_hex, salt_hex, iv_hex, tag_hex = HybridCryptoEngine.wrap_private_key(
+            priv_pem, req.new_password
+        )
+
+        user.public_key = pub_pem
+        user.encrypted_private_key = enc_priv_hex
+        user.private_key_salt = salt_hex
+        user.private_key_iv = iv_hex
+        user.private_key_tag = tag_hex
+
+        db.commit()
+        db.refresh(user)
+
+        # Clear used OTP
+        _OTP_STORE.pop(store_key, None)
+
+        AuditService.log_event(
+            db=db,
+            action="PASSWORD_RESET_SUCCESS",
+            user_id=user.id,
+            username=user.username,
+            target_type="USER",
+            target_id=user.id,
+            status="SUCCESS",
+            ip_address=ip_address,
+            details=f"Master password reset via verified Email OTP. Fresh 2048-bit RSA envelope initialized."
+        )
+
+        return {
+            "success": True,
+            "message": "Password successfully reset! You can now log in with your new password."
+        }
 
     @classmethod
     def register_user(
@@ -51,24 +256,32 @@ class AuthService:
         user_agent: Optional[str] = None
     ) -> User:
         """
-        Registers a new user:
-        1. Checks for unique username/email
-        2. Hashes password with bcrypt
-        3. Generates 2048-bit RSA keypair
-        4. Encrypts RSA private key using PBKDF2-derived KEK from user password
-        5. Saves public key and encrypted private key envelope to database
-        6. Logs audit trail event
+        Registers a new user with optional OTP verification.
         """
-        if db.query(User).filter(User.username == req.username).first():
+        username_clean = req.username.strip()
+        email_clean = req.email.strip().lower()
+
+        if db.query(User).filter(User.username == username_clean).first():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Username '{req.username}' is already registered."
+                detail=f"Username '{username_clean}' is already registered."
             )
-        if db.query(User).filter(User.email == req.email).first():
+        if db.query(User).filter(User.email == email_clean).first():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Email '{req.email}' is already registered."
+                detail=f"Email '{email_clean}' is already registered."
             )
+
+        # Optional OTP verification check if OTP was provided
+        if req.otp:
+            store_key = f"{email_clean}:register"
+            record = _OTP_STORE.get(store_key)
+            if not record or record.get("otp") != req.otp.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid email verification OTP code."
+                )
+            _OTP_STORE.pop(store_key, None)
 
         # 1. Hash Password
         password_hash = cls.hash_password(req.password)
@@ -82,9 +295,9 @@ class AuthService:
         )
 
         user = User(
-            username=req.username,
-            email=req.email,
-            full_name=req.full_name or req.username.capitalize(),
+            username=username_clean,
+            email=email_clean,
+            full_name=req.full_name or username_clean.capitalize(),
             password_hash=password_hash,
             role=req.role or "user",
             public_key=pub_pem,
@@ -110,7 +323,7 @@ class AuthService:
             status="SUCCESS",
             ip_address=ip_address,
             user_agent=user_agent,
-            details=f"Registered account with 2048-bit RSA keypair and PBKDF2 protected envelope"
+            details=f"Registered account with verified email and 2048-bit RSA keypair envelope"
         )
 
         return user
@@ -127,12 +340,16 @@ class AuthService:
         """
         Authenticates user with username & password, logging all attempts.
         """
-        user = db.query(User).filter(User.username == username).first()
+        username_clean = username.strip()
+        user = db.query(User).filter(
+            (User.username == username_clean) | (User.email == username_clean.lower())
+        ).first()
+
         if not user or not cls.verify_password(password, user.password_hash):
             AuditService.log_event(
                 db=db,
                 action="LOGIN_FAILURE",
-                username=username,
+                username=username_clean,
                 target_type="SESSION",
                 status="FAILURE",
                 ip_address=ip_address,

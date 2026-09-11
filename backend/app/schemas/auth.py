@@ -8,10 +8,25 @@ class UserRegisterRequest(BaseModel):
     password: str = Field(..., min_length=6)
     full_name: Optional[str] = None
     role: Optional[str] = "user"  # 'user', 'admin', 'auditor'
+    otp: Optional[str] = None  # 6-digit email verification OTP
 
 class UserLoginRequest(BaseModel):
     username: str
     password: str
+
+class SendOtpRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=100)
+    purpose: str = "register"  # "register", "forgot_password"
+
+class VerifyOtpRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=100)
+    otp: str = Field(..., min_length=6, max_length=6)
+    purpose: str = "register"
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=100)
+    otp: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=6)
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -35,5 +50,6 @@ class UserPublicKeyOut(BaseModel):
 
     id: str
     username: str
-    full_name: Optional[str]
+    email: Optional[str] = None
+    full_name: Optional[str] = None
     public_key: str

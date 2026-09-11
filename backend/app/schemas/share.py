@@ -2,9 +2,14 @@ from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
 
+class CustomRecipient(BaseModel):
+    label: str
+    public_key_pem: str
+
 class ShareCreateRequest(BaseModel):
     file_id: str
-    recipient_usernames: List[str]
+    recipient_usernames: List[str] = []
+    custom_recipients: Optional[List[CustomRecipient]] = []
     permission: str = "download"  # 'read', 'download'
     expires_in_hours: Optional[int] = None  # None for no expiration, e.g. 1, 24, 168
 

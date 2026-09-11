@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ShieldPlus, X, UploadCloud, ShieldCheck, Loader2 } from 'lucide-react';
+import { ShieldPlus, X, UploadCloud, ShieldCheck, Loader2, Search, Plus, Trash2 } from 'lucide-react';
 import { ApiService, formatBytes } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -13,6 +13,8 @@ export const UploadModal = ({ isOpen, onClose, onSuccess }) => {
   const [password, setPassword] = useState(masterPassword || '');
   const [recipients, setRecipients] = useState([]);
   const [selectedRecipients, setSelectedRecipients] = useState([]);
+  const [customInput, setCustomInput] = useState('');
+  const [searchFilter, setSearchFilter] = useState('');
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -57,10 +59,21 @@ export const UploadModal = ({ isOpen, onClose, onSuccess }) => {
     reader.readAsArrayBuffer(file);
   };
 
-  const toggleRecipient = (username) => {
+  const toggleRecipient = (identifier) => {
     setSelectedRecipients((prev) =>
-      prev.includes(username) ? prev.filter((u) => u !== username) : [...prev, username]
+      prev.includes(identifier) ? prev.filter((u) => u !== identifier) : [...prev, identifier]
     );
+  };
+
+  const handleAddCustom = (e) => {
+    e.preventDefault();
+    const clean = customInput.trim();
+    if (!clean) return;
+    if (!selectedRecipients.includes(clean)) {
+      setSelectedRecipients((prev) => [...prev, clean]);
+      showToast(`Added '${clean}' to recipients`, 'success');
+    }
+    setCustomInput('');
   };
 
   const handleSubmit = async (e) => {
@@ -99,15 +112,26 @@ export const UploadModal = ({ isOpen, onClose, onSuccess }) => {
     setSelectedFile(null);
     setFileHashPreview('');
     setSelectedRecipients([]);
+    setCustomInput('');
+    setSearchFilter('');
     onClose();
   };
+
+  const filteredUsers = recipients.filter((u) => {
+    const q = searchFilter.toLowerCase();
+    return (
+      u.username.toLowerCase().includes(q) ||
+      (u.full_name && u.full_name.toLowerCase().includes(q)) ||
+      (u.email && u.email.toLowerCase().includes(q))
+    );
+  });
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-[#030712]/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
       <div className="glass-panel glass-panel-glow w-full max-w-xl p-6 relative border border-sky-500/30 bg-[#0d121d]/95">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
             <ShieldPlus className="w-5 h-5 text-sky-400" />
             Hybrid File Encryptor & Storage
@@ -117,7 +141,7 @@ export const UploadModal = ({ isOpen, onClose, onSuccess }) => {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3.5">
           {/* Dropzone */}
           <div
             onClick={() => fileInputRef.current?.click()}
@@ -131,7 +155,7 @@ export const UploadModal = ({ isOpen, onClose, onSuccess }) => {
               setIsDragOver(false);
               if (e.dataTransfer.files?.[0]) handleFileChange(e.dataTransfer.files[0]);
             }}
-            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition ${
+            className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition ${
               isDragOver ? 'border-sky-400 bg-sky-950/30' : 'border-slate-700 hover:border-sky-500/50 bg-slate-900/40'
             }`}
           >
@@ -141,21 +165,21 @@ export const UploadModal = ({ isOpen, onClose, onSuccess }) => {
               onChange={(e) => e.target.files?.[0] && handleFileChange(e.target.files[0])}
               className="hidden"
             />
-            <UploadCloud className="w-10 h-10 mx-auto text-sky-400 mb-2" />
+            <UploadCloud className="w-8 h-8 mx-auto text-sky-400 mb-1.5" />
             <div className="text-xs font-semibold text-slate-200">
               Click to select or drag & drop confidential file
             </div>
-            <div className="text-[11px] text-slate-500 mt-1">PDF, TXT, DOCX, XLSX, JSON, Images up to 50MB</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">PDF, TXT, DOCX, XLSX, JSON, Images up to 50MB</div>
           </div>
 
           {/* Selected File Details */}
           {selectedFile && (
-            <div className="p-3 rounded-lg bg-sky-950/30 border border-sky-500/30 text-xs">
+            <div className="p-2.5 rounded-lg bg-sky-950/30 border border-sky-500/30 text-xs">
               <div className="flex items-center justify-between font-semibold text-sky-300">
                 <span>{selectedFile.name}</span>
                 <span className="text-slate-400">{formatBytes(selectedFile.size)}</span>
               </div>
-              <div className="text-[10px] text-slate-400 mono mt-1 break-all">
+              <div className="text-[10px] text-slate-400 mono mt-0.5 break-all">
                 SHA-256: <span className="text-sky-300">{fileHashPreview}</span>
               </div>
             </div>
@@ -171,26 +195,71 @@ export const UploadModal = ({ isOpen, onClose, onSuccess }) => {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
-              placeholder="Enter your account password"
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+              placeholder="Enter your master password"
             />
           </div>
 
           {/* Recipient Selection */}
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Initial Recipients <span className="text-slate-500">(AES session key wrapped with their RSA-2048 public keys)</span>
-            </label>
-            <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto pr-1">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Recipients <span className="text-slate-500">(Encapsulate AES key with their RSA keys)</span>
+              </label>
+            </div>
+
+            {/* Custom Recipient input box */}
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                placeholder="Type custom username or email (e.g. charlie@company.com)..."
+                value={customInput}
+                onChange={(e) => setCustomInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddCustom(e);
+                  }
+                }}
+                className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-sky-400"
+              />
+              <button
+                type="button"
+                onClick={handleAddCustom}
+                className="px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium flex items-center gap-1 transition"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add
+              </button>
+            </div>
+
+            {/* Selected List */}
+            {selectedRecipients.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2 p-2 rounded-lg bg-slate-900/60 border border-slate-800">
+                {selectedRecipients.map((rec) => (
+                  <span
+                    key={rec}
+                    className="badge-crypto bg-sky-500/10 border-sky-500/30 text-sky-300 text-[11px] py-0.5 px-2 flex items-center gap-1"
+                  >
+                    <span>{rec}</span>
+                    <button type="button" onClick={() => toggleRecipient(rec)} className="hover:text-rose-400">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Directory users grid */}
+            <div className="grid grid-cols-2 gap-1.5 max-h-28 overflow-y-auto pr-1">
               {loadingUsers ? (
-                <div className="text-xs text-slate-500 col-span-2 py-2">Loading user directory...</div>
+                <div className="text-xs text-slate-500 col-span-2 py-1">Loading user directory...</div>
               ) : recipients.length === 0 ? (
                 <div className="text-xs text-slate-500 col-span-2 italic">No other users registered.</div>
               ) : (
                 recipients.map((u) => (
                   <label
                     key={u.id}
-                    className={`flex items-center gap-2 text-xs p-2 rounded-lg border cursor-pointer transition ${
+                    className={`flex items-center gap-2 text-xs p-1.5 rounded-lg border cursor-pointer transition ${
                       selectedRecipients.includes(u.username)
                         ? 'bg-sky-950/40 border-sky-500 text-sky-200'
                         : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-sky-500/40'

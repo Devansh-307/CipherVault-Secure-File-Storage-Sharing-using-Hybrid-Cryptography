@@ -1,11 +1,27 @@
 import React, { useState } from 'react';
-import { ShieldCheck, ArrowRight, Zap, Loader2 } from 'lucide-react';
+import { 
+  ShieldCheck, 
+  ArrowRight, 
+  Zap, 
+  Loader2, 
+  Mail, 
+  KeyRound, 
+  CheckCircle2, 
+  ArrowLeft,
+  Send,
+  Lock
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { ApiService } from '../services/api';
 
 export const AuthModal = () => {
-  const [isRegister, setIsRegister] = useState(false);
+  // Mode: 'login' | 'register' | 'forgot_password'
+  const [authMode, setAuthMode] = useState('login');
   const [loading, setLoading] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpDebugCode, setOtpDebugCode] = useState('');
   const { login, register } = useAuth();
   const { showToast } = useToast();
 
@@ -19,6 +35,15 @@ export const AuthModal = () => {
   const [regFullName, setRegFullName] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regRole, setRegRole] = useState('user');
+  const [regOtp, setRegOtp] = useState('');
+
+  // Forgot Password form state
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotOtp, setForgotOtp] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+
+  // --- Handlers ---
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -27,24 +52,6 @@ export const AuthModal = () => {
       await login(loginUsername.trim(), loginPassword);
     } catch (err) {
       showToast(err.message, 'error', 'Login Failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRegisterSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await register({
-        username: regUsername.trim(),
-        email: regEmail.trim(),
-        full_name: regFullName.trim() || undefined,
-        password: regPassword,
-        role: regRole,
-      });
-    } catch (err) {
-      showToast(err.message, 'error', 'Registration Error');
     } finally {
       setLoading(false);
     }
@@ -61,9 +68,113 @@ export const AuthModal = () => {
     }
   };
 
+  const handleSendRegisterOtp = async () => {
+    if (!regEmail || !regEmail.includes('@')) {
+      showToast('Please enter a valid email address first.', 'error');
+      return;
+    }
+    setOtpSending(true);
+    try {
+      const res = await ApiService.sendOtp(regEmail.trim(), 'register');
+      setOtpSent(true);
+      if (res.otp_code) {
+        setOtpDebugCode(res.otp_code);
+        setRegOtp(res.otp_code); // Auto-fill for convenience
+      }
+      showToast(`Verification code sent to ${regEmail}!`, 'success', 'OTP Sent');
+    } catch (err) {
+      showToast(err.message, 'error', 'Failed to send OTP');
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleRegisterSubmit = async (e) => {
+    e.preventDefault();
+    if (!regOtp || regOtp.length !== 6) {
+      showToast('Please enter the 6-digit verification code sent to your email.', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      await register({
+        username: regUsername.trim(),
+        email: regEmail.trim(),
+        full_name: regFullName.trim() || undefined,
+        password: regPassword,
+        role: regRole,
+        otp: regOtp.trim(),
+      });
+      showToast('Account created and 2048-bit RSA keypair initialized!', 'success');
+    } catch (err) {
+      showToast(err.message, 'error', 'Registration Error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendForgotOtp = async () => {
+    if (!forgotEmail || !forgotEmail.includes('@')) {
+      showToast('Please enter your registered email address.', 'error');
+      return;
+    }
+    setOtpSending(true);
+    try {
+      const res = await ApiService.sendOtp(forgotEmail.trim(), 'forgot_password');
+      setOtpSent(true);
+      if (res.otp_code) {
+        setOtpDebugCode(res.otp_code);
+        setForgotOtp(res.otp_code); // Auto-fill for testing
+      }
+      showToast(`Password reset code sent to ${forgotEmail}!`, 'success', 'OTP Dispatched');
+    } catch (err) {
+      showToast(err.message, 'error', 'Reset Code Failed');
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!forgotOtp || forgotOtp.length !== 6) {
+      showToast('Please enter the 6-digit OTP code.', 'error');
+      return;
+    }
+    if (forgotNewPassword.length < 6) {
+      showToast('New password must be at least 6 characters.', 'error');
+      return;
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      showToast('Passwords do not match.', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await ApiService.forgotPassword(forgotEmail.trim(), forgotOtp.trim(), forgotNewPassword);
+      showToast('Password reset successfully! You can now log in.', 'success', 'Password Updated');
+      setAuthMode('login');
+      setLoginUsername(forgotEmail.trim());
+      setLoginPassword('');
+      setOtpSent(false);
+      setOtpDebugCode('');
+    } catch (err) {
+      showToast(err.message, 'error', 'Password Reset Failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const switchMode = (mode) => {
+    setAuthMode(mode);
+    setOtpSent(false);
+    setOtpDebugCode('');
+  };
+
   return (
     <div className="fixed inset-0 bg-[#030712]/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
       <div className="glass-panel glass-panel-glow w-full max-w-md p-8 relative border border-sky-500/30 bg-[#0d121d]/95">
+        {/* Header */}
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-400 mb-3 shadow-lg shadow-sky-500/10">
             <ShieldCheck className="w-8 h-8" />
@@ -73,88 +184,115 @@ export const AuthModal = () => {
           <div className="text-[11px] text-sky-400 mt-1 font-medium">Developed by Devansh Rathore</div>
         </div>
 
-        {/* Quick Demo Logins */}
-        <div className="mb-6 p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
-          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5 text-amber-400" /> Instant 1-Click Demo Accounts
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { name: 'Devansh (Admin)', user: 'devansh', color: 'text-sky-400 bg-sky-500/10 border-sky-500/30' },
-              { name: 'Bob (User)', user: 'bob', color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30' },
-              { name: 'Charlie (User)', user: 'charlie', color: 'text-purple-400 bg-purple-500/10 border-purple-500/30' },
-              { name: 'Auditor', user: 'auditor', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' },
-            ].map((acc) => (
-              <button
-                key={acc.user}
-                type="button"
-                onClick={() => handleDemoLogin(acc.user)}
-                disabled={loading}
-                className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center justify-between hover:opacity-80 transition disabled:opacity-50 ${acc.color}`}
-              >
-                <span>{acc.name}</span>
-                <ArrowRight className="w-3 h-3" />
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* ---------------- 1. LOGIN MODE ---------------- */}
+        {authMode === 'login' && (
+          <>
+            {/* Quick Demo Logins */}
+            <div className="mb-6 p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
+              <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-amber-400" /> Instant 1-Click Demo Accounts
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { name: 'Devansh (Admin)', user: 'devansh', color: 'text-sky-400 bg-sky-500/10 border-sky-500/30' },
+                  { name: 'Bob (User)', user: 'bob', color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30' },
+                  { name: 'Charlie (User)', user: 'charlie', color: 'text-purple-400 bg-purple-500/10 border-purple-500/30' },
+                  { name: 'Auditor', user: 'auditor', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' },
+                ].map((acc) => (
+                  <button
+                    key={acc.user}
+                    type="button"
+                    onClick={() => handleDemoLogin(acc.user)}
+                    disabled={loading}
+                    className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center justify-between hover:opacity-80 transition disabled:opacity-50 ${acc.color}`}
+                  >
+                    <span>{acc.name}</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        {!isRegister ? (
-          /* Login View */
-          <form onSubmit={handleLoginSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Username</label>
-              <input
-                type="text"
-                required
-                value={loginUsername}
-                onChange={(e) => setLoginUsername(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-900/90 border border-slate-700 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400"
-                placeholder="e.g. devansh"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Master Password</label>
-              <input
-                type="password"
-                required
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-900/90 border border-slate-700 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400"
-                placeholder="••••••••••••"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2.5 rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white text-sm font-semibold shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Authenticating...</span>
-                </>
-              ) : (
-                <>
-                  <span>Access Encrypted Vault</span>
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </button>
-            <div className="text-center mt-4 text-xs text-slate-400">
-              Need a new cryptographic identity?{' '}
+            <form onSubmit={handleLoginSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">Username or Email</label>
+                <input
+                  type="text"
+                  required
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-900/90 border border-slate-700 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400"
+                  placeholder="e.g. devansh or user@company.com"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-medium text-slate-300">Master Password</label>
+                  <button
+                    type="button"
+                    onClick={() => switchMode('forgot_password')}
+                    className="text-[11px] text-sky-400 hover:underline hover:text-sky-300"
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+                <input
+                  type="password"
+                  required
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-900/90 border border-slate-700 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400"
+                  placeholder="••••••••••••"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white text-sm font-semibold shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Authenticating...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Access Encrypted Vault</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+
+              <div className="text-center mt-4 text-xs text-slate-400">
+                Need a new cryptographic identity?{' '}
+                <button
+                  type="button"
+                  onClick={() => switchMode('register')}
+                  className="text-sky-400 hover:underline font-semibold ml-1"
+                >
+                  Create Account & Keypair
+                </button>
+              </div>
+            </form>
+          </>
+        )}
+
+        {/* ---------------- 2. REGISTER MODE WITH OTP ---------------- */}
+        {authMode === 'register' && (
+          <form onSubmit={handleRegisterSubmit} className="space-y-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">Register & Generate RSA Keypair</span>
               <button
                 type="button"
-                onClick={() => setIsRegister(true)}
-                className="text-sky-400 hover:underline font-semibold ml-1"
+                onClick={() => switchMode('login')}
+                className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1"
               >
-                Create Account & Keypair
+                <ArrowLeft className="w-3 h-3" /> Back
               </button>
             </div>
-          </form>
-        ) : (
-          /* Register View */
-          <form onSubmit={handleRegisterSubmit} className="space-y-3">
+
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">Username</label>
               <input
@@ -162,31 +300,67 @@ export const AuthModal = () => {
                 required
                 value={regUsername}
                 onChange={(e) => setRegUsername(e.target.value)}
-                className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
-                placeholder="e.g. devansh"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                placeholder="e.g. alex_crypto"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Email</label>
-              <input
-                type="email"
-                required
-                value={regEmail}
-                onChange={(e) => setRegEmail(e.target.value)}
-                className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
-                placeholder="devansh@ciphervault.io"
-              />
-            </div>
+
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">Full Name</label>
               <input
                 type="text"
                 value={regFullName}
                 onChange={(e) => setRegFullName(e.target.value)}
-                className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
-                placeholder="Devansh Rathore"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                placeholder="Alex Mercer"
               />
             </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Email Address</label>
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  required
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                  placeholder="alex@company.com"
+                />
+                <button
+                  type="button"
+                  onClick={handleSendRegisterOtp}
+                  disabled={otpSending}
+                  className="px-3 py-2 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium flex items-center gap-1 transition whitespace-nowrap"
+                >
+                  {otpSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  <span>{otpSent ? 'Resend OTP' : 'Send OTP'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* OTP Input Field */}
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">
+                6-Digit Email Verification Code {otpSent && <span className="text-emerald-400 font-semibold">(Sent)</span>}
+              </label>
+              <input
+                type="text"
+                required
+                maxLength={6}
+                value={regOtp}
+                onChange={(e) => setRegOtp(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono tracking-widest text-center focus:outline-none focus:border-emerald-400"
+                placeholder="123456"
+              />
+              {otpDebugCode && (
+                <div className="text-[10px] text-emerald-400 mt-1 flex items-center justify-between">
+                  <span>Simulated OTP Delivery Code:</span>
+                  <span className="font-mono font-bold bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/40">{otpDebugCode}</span>
+                </div>
+              )}
+            </div>
+
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">Master Password</label>
               <input
@@ -194,49 +368,149 @@ export const AuthModal = () => {
                 required
                 value={regPassword}
                 onChange={(e) => setRegPassword(e.target.value)}
-                className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
-                placeholder="Min 6 characters"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                placeholder="Min 6 characters (Derives KEK Envelope)"
               />
             </div>
+
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">Role</label>
               <select
                 value={regRole}
                 onChange={(e) => setRegRole(e.target.value)}
-                className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
               >
                 <option value="user">Standard User</option>
                 <option value="admin">Administrator</option>
                 <option value="auditor">Security Auditor</option>
               </select>
             </div>
+
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60"
+              className="w-full py-2.5 mt-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60"
             >
               {loading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Generating 2048-bit RSA Keys...</span>
+                  <span>Verifying OTP & Generating 2048-bit RSA Keys...</span>
                 </>
               ) : (
                 <>
-                  <span>Initialize Account & RSA Keys</span>
+                  <span>Verify Code & Initialize Keypair</span>
                   <ShieldCheck className="w-4 h-4" />
                 </>
               )}
             </button>
-            <div className="text-center mt-3 text-xs text-slate-400">
-              Already registered?{' '}
+          </form>
+        )}
+
+        {/* ---------------- 3. FORGOT PASSWORD MODE ---------------- */}
+        {authMode === 'forgot_password' && (
+          <form onSubmit={handleForgotPasswordSubmit} className="space-y-3.5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <KeyRound className="w-4 h-4 text-sky-400" /> Reset Master Password
+              </span>
               <button
                 type="button"
-                onClick={() => setIsRegister(false)}
-                className="text-sky-400 hover:underline font-semibold ml-1"
+                onClick={() => switchMode('login')}
+                className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1"
               >
-                Back to Login
+                <ArrowLeft className="w-3 h-3" /> Back
               </button>
             </div>
+
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Enter your registered email address. We will send a secure 6-digit OTP to verify your identity and generate a fresh PBKDF2 RSA keypair envelope.
+            </p>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Registered Email</label>
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  required
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                  placeholder="e.g. devansh@ciphervault.io"
+                />
+                <button
+                  type="button"
+                  onClick={handleSendForgotOtp}
+                  disabled={otpSending}
+                  className="px-3 py-2 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium flex items-center gap-1 transition whitespace-nowrap"
+                >
+                  {otpSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  <span>{otpSent ? 'Resend Code' : 'Send Code'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">
+                6-Digit Verification Code {otpSent && <span className="text-emerald-400 font-semibold">(Sent)</span>}
+              </label>
+              <input
+                type="text"
+                required
+                maxLength={6}
+                value={forgotOtp}
+                onChange={(e) => setForgotOtp(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono tracking-widest text-center focus:outline-none focus:border-sky-400"
+                placeholder="123456"
+              />
+              {otpDebugCode && (
+                <div className="text-[10px] text-emerald-400 mt-1 flex items-center justify-between">
+                  <span>Simulated OTP Delivery Code:</span>
+                  <span className="font-mono font-bold bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/40">{otpDebugCode}</span>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">New Master Password</label>
+              <input
+                type="password"
+                required
+                value={forgotNewPassword}
+                onChange={(e) => setForgotNewPassword(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                placeholder="Min 6 characters"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Confirm New Password</label>
+              <input
+                type="password"
+                required
+                value={forgotConfirmPassword}
+                onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                placeholder="••••••••••••"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white text-xs font-semibold shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Verifying Code & Updating Envelope...</span>
+                </>
+              ) : (
+                <>
+                  <span>Reset Password & Update Keys</span>
+                  <Lock className="w-4 h-4" />
+                </>
+              )}
+            </button>
           </form>
         )}
       </div>

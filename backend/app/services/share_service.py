@@ -1,5 +1,5 @@
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
@@ -25,7 +25,7 @@ class ShareService:
         user_agent: Optional[str] = None
     ) -> List[SharedFile]:
         """
-        Shares a file with one or more recipients:
+        Shares a file with one or more recipients (by username, email, or custom RSA public key):
         1. Validates sender owns the file.
         2. Unlocks sender's RSA private key with password and unwraps the AES session key.
         3. For each recipient, fetches their RSA public key and encrypts the session key (RSA-OAEP).
@@ -57,15 +57,56 @@ class ShareService:
         # 2. Expiration timestamp
         expires_at = None
         if req.expires_in_hours and req.expires_in_hours > 0:
-            expires_at = datetime.utcnow() + timedelta(hours=req.expires_in_hours)
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=req.expires_in_hours)
 
         created_shares = []
 
-        # 3. Encapsulate session key for each recipient
-        for recipient_name in req.recipient_usernames:
-            recipient = db.query(User).filter(User.username == recipient_name).first()
-            if not recipient:
+        # 3. Encapsulate session key for each username/email recipient
+        for identifier in req.recipient_usernames:
+            clean_id = identifier.strip()
+            if not clean_id:
                 continue
+
+            # Query by username or email
+            recipient = db.query(User).filter(
+                (User.username == clean_id) | (User.email == clean_id.lower())
+            ).first()
+
+            if not recipient:
+                # If recipient is not yet registered in database, we can auto-create a pending guest identity
+                # or skip if invalid. Let's create a pending guest identity if valid email!
+                if "@" in clean_id:
+                    guest_username = clean_id.split("@")[0].lower() + "_guest"
+                    # ensure unique
+                    cnt = 1
+                    base_u = guest_username
+                    while db.query(User).filter(User.username == guest_username).first():
+                        guest_username = f"{base_u}_{cnt}"
+                        cnt += 1
+                    
+                    priv_pem, pub_pem = HybridCryptoEngine.generate_rsa_keypair(key_size=2048)
+                    enc_priv_hex, salt_hex, iv_hex, tag_hex = HybridCryptoEngine.wrap_private_key(
+                        priv_pem, "GuestPassword123!"
+                    )
+                    recipient = User(
+                        username=guest_username,
+                        email=clean_id.lower(),
+                        full_name=f"Guest ({clean_id})",
+                        password_hash=AuthService.hash_password("GuestPassword123!"),
+                        role="user",
+                        public_key=pub_pem,
+                        encrypted_private_key=enc_priv_hex,
+                        private_key_salt=salt_hex,
+                        private_key_iv=iv_hex,
+                        private_key_tag=tag_hex,
+                        is_active=True
+                    )
+                    db.add(recipient)
+                    db.commit()
+                    db.refresh(recipient)
+                else:
+                    continue
+
             if recipient.id == sender.id:
                 continue  # Cannot share with self
 
@@ -109,8 +150,55 @@ class ShareService:
                 status="SUCCESS",
                 ip_address=ip_address,
                 user_agent=user_agent,
-                details=f"Shared '{file_record.original_filename}' with user '{recipient.username}'. Expiry: {expires_at.isoformat() if expires_at else 'Never'}"
+                details=f"Shared '{file_record.original_filename}' with '{recipient.username}' ({recipient.email}). Expiry: {expires_at.isoformat() if expires_at else 'Never'}"
             )
+
+        # 4. Handle any custom RSA public keys
+        if req.custom_recipients:
+            for cr in req.custom_recipients:
+                if not cr.public_key_pem or "PUBLIC KEY" not in cr.public_key_pem:
+                    continue
+                try:
+                    rec_enc_key_bytes = HybridCryptoEngine.encrypt_rsa_oaep(session_key, cr.public_key_pem)
+                    rec_enc_key_b64 = base64.b64encode(rec_enc_key_bytes).decode("utf-8")
+                    
+                    # Create placeholder guest user for this custom public key
+                    custom_label = cr.label or "external_recipient"
+                    guest_username = f"ext_{custom_label.lower().replace(' ', '_')[:20]}"
+                    recipient = db.query(User).filter(User.username == guest_username).first()
+                    if not recipient:
+                        priv_pem, _ = HybridCryptoEngine.generate_rsa_keypair(key_size=2048)
+                        enc_priv_hex, salt_hex, iv_hex, tag_hex = HybridCryptoEngine.wrap_private_key(priv_pem, "GuestPassword123!")
+                        recipient = User(
+                            username=guest_username,
+                            email=f"{guest_username}@external.crypto",
+                            full_name=cr.label,
+                            password_hash=AuthService.hash_password("GuestPassword123!"),
+                            role="user",
+                            public_key=cr.public_key_pem,
+                            encrypted_private_key=enc_priv_hex,
+                            private_key_salt=salt_hex,
+                            private_key_iv=iv_hex,
+                            private_key_tag=tag_hex,
+                            is_active=True
+                        )
+                        db.add(recipient)
+                        db.commit()
+                        db.refresh(recipient)
+
+                    new_share = SharedFile(
+                        file_id=file_record.id,
+                        sender_id=sender.id,
+                        recipient_id=recipient.id,
+                        encrypted_session_key=rec_enc_key_b64,
+                        permission=req.permission,
+                        expires_at=expires_at,
+                        is_revoked=False
+                    )
+                    db.add(new_share)
+                    created_shares.append(new_share)
+                except Exception as e:
+                    print(f"Error encrypting with custom public key: {e}")
 
         db.commit()
         return created_shares
@@ -136,7 +224,7 @@ class ShareService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied.")
 
         share.is_revoked = True
-        share.revoked_at = datetime.utcnow()
+        share.revoked_at = datetime.now(timezone.utc)
         db.commit()
 
         recipient = db.query(User).filter(User.id == share.recipient_id).first()
@@ -167,13 +255,16 @@ class ShareService:
         ).all()
 
         results = []
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for s in shares:
             file_rec = s.file
             if not file_rec:
                 continue
             
-            is_expired = bool(s.expires_at and s.expires_at < now)
+            is_expired = False
+            if s.expires_at:
+                exp_dt = s.expires_at if s.expires_at.tzinfo else s.expires_at.replace(tzinfo=timezone.utc)
+                is_expired = bool(exp_dt < now)
             
             results.append(SharedWithMeOut(
                 share_id=s.id,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, FileCode, LogOut, Key, ExternalLink, FileDown } from 'lucide-react';
+import { ShieldCheck, LogOut, Key } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const Navbar = ({ onOpenKeyInspector }) => {
@@ -23,30 +23,6 @@ export const Navbar = ({ onOpenKeyInspector }) => {
 
         {/* Action Controls & User Identity */}
         <div className="flex items-center gap-3">
-          {/* Direct Word Document Download Button */}
-          <a
-            href="/api/download-report"
-            download="CIPHERVAULT_PROJECT_REPORT_AND_INTERVIEW_GUIDE.docx"
-            className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition border border-emerald-500/30 shadow-sm"
-            title="Download Word Report (.docx)"
-          >
-            <FileDown className="w-4 h-4 text-emerald-400" />
-            <span className="hidden sm:inline">Download Word Report (.docx)</span>
-            <span className="sm:hidden">Report (.docx)</span>
-          </a>
-
-          {/* FastAPI Docs */}
-          <a
-            href="/docs"
-            target="_blank"
-            rel="noreferrer"
-            className="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 text-xs font-medium flex items-center gap-1.5 transition border border-slate-700 hidden md:flex"
-          >
-            <FileCode className="w-3.5 h-3.5 text-sky-400" />
-            <span>FastAPI Docs</span>
-            <ExternalLink className="w-3 h-3 text-slate-500" />
-          </a>
-
           {user && (
             <button
               onClick={onOpenKeyInspector}

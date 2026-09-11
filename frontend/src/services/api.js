@@ -46,7 +46,7 @@ export class ApiService {
         headers,
       });
 
-      if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/register')) {
+      if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/register') && !endpoint.includes('/auth/forgot-password')) {
         this.clearToken();
         window.dispatchEvent(new Event('ciphervault_unauthorized'));
         throw new Error('Session expired. Please log in again.');
@@ -73,6 +73,27 @@ export class ApiService {
 
   static login(credentials) {
     return this.request('/auth/login', { method: 'POST', body: credentials });
+  }
+
+  static sendOtp(email, purpose = 'register') {
+    return this.request('/auth/send-otp', {
+      method: 'POST',
+      body: { email, purpose },
+    });
+  }
+
+  static verifyOtp(email, otp, purpose = 'register') {
+    return this.request('/auth/verify-otp', {
+      method: 'POST',
+      body: { email, otp, purpose },
+    });
+  }
+
+  static forgotPassword(email, otp, newPassword) {
+    return this.request('/auth/forgot-password', {
+      method: 'POST',
+      body: { email, otp, new_password: newPassword },
+    });
   }
 
   static getMe() {
@@ -109,12 +130,13 @@ export class ApiService {
   }
 
   // Sharing endpoints
-  static shareFile(fileId, recipientUsernames, password, permission = 'download', expiresInHours = null) {
+  static shareFile(fileId, recipientUsernames, password, permission = 'download', expiresInHours = null, customRecipients = []) {
     return this.request('/shares', {
       method: 'POST',
       body: {
         file_id: fileId,
         recipient_usernames: recipientUsernames,
+        custom_recipients: customRecipients,
         password,
         permission,
         expires_in_hours: expiresInHours ? parseInt(expiresInHours, 10) : null,
