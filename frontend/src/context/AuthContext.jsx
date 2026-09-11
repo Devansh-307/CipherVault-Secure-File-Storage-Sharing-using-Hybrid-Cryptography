@@ -4,6 +4,26 @@ import { useToast } from './ToastContext';
 
 const AuthContext = createContext(null);
 
+const DEFAULT_SAVED_ACCOUNTS = [
+  { username: 'devansh', full_name: 'Devansh Rathore', role: 'admin', email: 'devansh@ciphervault.io', is_demo: true },
+  { username: 'bob', full_name: 'Bob Vance', role: 'user', email: 'bob@ciphervault.io', is_demo: true },
+  { username: 'charlie', full_name: 'Charlie Davis', role: 'user', email: 'charlie@ciphervault.io', is_demo: true },
+  { username: 'auditor', full_name: 'Auditor General', role: 'auditor', email: 'auditor@ciphervault.io', is_demo: true },
+];
+
+const getInitialSavedAccounts = () => {
+  try {
+    const raw = localStorage.getItem('ciphervault_saved_accounts');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {
+    console.warn('Failed to parse saved accounts:', e);
+  }
+  return DEFAULT_SAVED_ACCOUNTS;
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(() => {
     const cached = localStorage.getItem('ciphervault_user');
@@ -13,7 +33,42 @@ export const AuthProvider = ({ children }) => {
   const [masterPassword, setMasterPassword] = useState(() => {
     return sessionStorage.getItem('current_master_key') || '';
   });
+  const [savedAccounts, setSavedAccounts] = useState(getInitialSavedAccounts);
   const { showToast } = useToast();
+
+  const persistAccountToHistory = (userData) => {
+    try {
+      const updatedAccount = {
+        username: userData.username,
+        full_name: userData.full_name || userData.username,
+        email: userData.email || '',
+        role: userData.role || 'user',
+        last_login: new Date().toISOString(),
+      };
+
+      setSavedAccounts((prev) => {
+        const filtered = prev.filter(
+          (acc) => acc.username.toLowerCase() !== userData.username.toLowerCase()
+        );
+        const nextList = [updatedAccount, ...filtered].slice(0, 8);
+        localStorage.setItem('ciphervault_saved_accounts', JSON.stringify(nextList));
+        return nextList;
+      });
+    } catch (e) {
+      console.warn('Error saving account to history:', e);
+    }
+  };
+
+  const removeSavedAccount = (username) => {
+    setSavedAccounts((prev) => {
+      const nextList = prev.filter(
+        (acc) => acc.username.toLowerCase() !== username.toLowerCase()
+      );
+      localStorage.setItem('ciphervault_saved_accounts', JSON.stringify(nextList));
+      return nextList;
+    });
+    showToast(`Removed @${username} from saved accounts.`, 'info');
+  };
 
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -38,6 +93,7 @@ export const AuthProvider = ({ children }) => {
         const profile = await ApiService.getMe();
         setUser(profile);
         localStorage.setItem('ciphervault_user', JSON.stringify(profile));
+        persistAccountToHistory(profile);
       } catch (err) {
         console.warn('Session verification failed:', err);
         ApiService.clearToken();
@@ -57,12 +113,14 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('ciphervault_user', JSON.stringify(data.user));
     setMasterPassword(password);
     sessionStorage.setItem('current_master_key', password);
+    persistAccountToHistory(data.user);
     showToast(`Welcome back, ${data.user.full_name || data.user.username}!`, 'success', 'Authenticated');
     return data.user;
   };
 
   const register = async (userData) => {
     const newUser = await ApiService.register(userData);
+    persistAccountToHistory(newUser);
     showToast('2048-bit RSA keypair generated & secured with PBKDF2!', 'success', 'Identity Initialized');
     // Auto-login with the newly created password
     return await login(userData.username, userData.password);
@@ -87,6 +145,8 @@ export const AuthProvider = ({ children }) => {
         user,
         loading,
         masterPassword,
+        savedAccounts,
+        removeSavedAccount,
         saveCachedPassword,
         login,
         register,

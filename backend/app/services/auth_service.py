@@ -326,6 +326,38 @@ class AuthService:
             details=f"Registered account with verified email and 2048-bit RSA keypair envelope"
         )
 
+        # Auto-provision a starter welcome encrypted file in the user's private vault
+        try:
+            from app.services.file_service import FileService
+            welcome_content = (
+                f"CIPHERVAULT SECURE VAULT INITIALIZATION\n"
+                f"======================================\n"
+                f"Owner: {user.full_name} (@{user.username})\n"
+                f"Email: {user.email}\n"
+                f"Role: {user.role.upper()}\n"
+                f"Security Profile: NIST SP 800-38D AES-256-GCM + PKCS#1 v2.2 RSA-2048 OAEP\n"
+                f"Integrity Signature: SHA-256 Digest with RSA-PSS Non-Repudiation\n\n"
+                f"Welcome to your private cryptographic storage vault, {user.full_name}!\n"
+                f"This document was encrypted on your behalf using a dedicated 256-bit AES session key "
+                f"and encapsulated with your personal 2048-bit RSA public key.\n\n"
+                f"Your private key is protected by a 100,000-iteration PBKDF2-HMAC-SHA256 envelope. "
+                f"You can safely decrypt this file, verify its digital signature, share it with others, "
+                f"or test tamper detection in the Tamper Simulation Lab.\n"
+            ).encode("utf-8")
+
+            FileService.upload_and_encrypt(
+                db=db,
+                file_bytes=welcome_content,
+                original_filename=f"welcome_{user.username}_vault.txt",
+                mime_type="text/plain",
+                owner=user,
+                owner_password=req.password,
+                ip_address=ip_address,
+                user_agent=user_agent
+            )
+        except Exception:
+            pass
+
         return user
 
     @classmethod
@@ -338,11 +370,11 @@ class AuthService:
         user_agent: Optional[str] = None
     ) -> User:
         """
-        Authenticates user with username & password, logging all attempts.
+        Authenticates user with username & password, logging all attempts (supports case-insensitive match).
         """
         username_clean = username.strip()
         user = db.query(User).filter(
-            (User.username == username_clean) | (User.email == username_clean.lower())
+            (User.username.ilike(username_clean)) | (User.email.ilike(username_clean.lower()))
         ).first()
 
         if not user or not cls.verify_password(password, user.password_hash):
