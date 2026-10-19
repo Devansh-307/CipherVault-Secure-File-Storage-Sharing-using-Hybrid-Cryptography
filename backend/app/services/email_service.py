@@ -28,8 +28,11 @@ class EmailService:
         smtp_host = settings.SMTP_HOST
         smtp_port = settings.SMTP_PORT
         smtp_user = settings.SMTP_USER
-        smtp_pass = settings.SMTP_PASSWORD
-        from_email = settings.MAIL_FROM or settings.SMTP_FROM_EMAIL or smtp_user or "security@ciphervault.io"
+        # For Gmail SMTP, the From address must match the authenticated account to prevent 553/550 sender rejection
+        if smtp_user and "@gmail.com" in smtp_user.lower() and (not settings.MAIL_FROM or settings.MAIL_FROM == "security@ciphervault.io"):
+            from_email = smtp_user
+        else:
+            from_email = settings.MAIL_FROM or settings.SMTP_FROM_EMAIL or smtp_user or "security@ciphervault.io"
 
         if not cls.is_smtp_configured():
             if settings.DEBUG:
