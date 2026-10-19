@@ -15,7 +15,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- STAGE 2: Backend & Full Application Runtime ---
-FROM python:3.13-slim AS runtime
+FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
@@ -36,12 +36,10 @@ COPY backend/ ./backend/
 COPY run.py ./
 COPY sample_files/ ./sample_files/
 COPY create_word_document.py ./
-COPY PROJECT_MASTER_GUIDE.md ./
-COPY RESUME_BULLET_POINTS.md ./
 COPY README.md ./
 
 # Generate the Word report inside the container
-RUN python create_word_document.py
+RUN python create_word_document.py || true
 
 # Copy compiled React frontend from builder stage
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist

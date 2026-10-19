@@ -442,7 +442,7 @@ def generate_report():
         doc.add_paragraph(a).paragraph_format.space_after = Pt(6)
 
     # Save document
-    out_path = Path(r"C:\Users\hp\.gemini\antigravity\scratch\hybrid-crypto-vault\CIPHERVAULT_PROJECT_REPORT_AND_INTERVIEW_GUIDE.docx")
+    out_path = Path(__file__).resolve().parent / "CIPHERVAULT_PROJECT_REPORT_AND_INTERVIEW_GUIDE.docx"
     doc.save(str(out_path))
     print(f"[+] Successfully generated Word Document at: {out_path}")
 
