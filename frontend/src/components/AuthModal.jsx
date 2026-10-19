@@ -21,7 +21,8 @@ import {
   History,
   Shield,
   Fingerprint,
-  Trash2
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -43,6 +44,7 @@ export const AuthModal = () => {
   // OTP state for password recovery
   const [otpSending, setOtpSending] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const { login, register, savedAccounts, removeSavedAccount, clearAllSavedAccounts } = useAuth();
   const { showToast } = useToast();
@@ -63,6 +65,17 @@ export const AuthModal = () => {
   const [forgotOtp, setForgotOtp] = useState('');
   const [forgotNewPassword, setForgotNewPassword] = useState('');
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+
+  // 60-second cooldown timer
+  useEffect(() => {
+    let timer;
+    if (resendCooldown > 0) {
+      timer = setInterval(() => {
+        setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   // Auto-advance showcase slide every 5 seconds
   useEffect(() => {
@@ -146,12 +159,17 @@ export const AuthModal = () => {
     }
     setOtpSending(true);
     try {
-      await ApiService.sendOtp(forgotEmail.trim(), 'forgot_password');
+      const res = await ApiService.sendOtp(forgotEmail.trim(), 'forgot_password');
       setOtpSent(true);
       setForgotOtp(''); // Clear input so user manually enters code received in email
-      showToast(`Verification code sent to ${forgotEmail}! Please check your email.`, 'success', 'OTP Dispatched');
+      setResendCooldown(res.resend_cooldown_seconds || 60);
+      showToast(
+        res.message || `If this email is registered, a verification code has been dispatched.`,
+        'success',
+        'OTP Dispatched'
+      );
     } catch (err) {
-      showToast(err.message, 'error', 'Reset Code Failed');
+      showToast(err.message || 'Failed to dispatch verification code.', 'error', 'Reset Code Failed');
     } finally {
       setOtpSending(false);
     }
@@ -174,15 +192,20 @@ export const AuthModal = () => {
 
     setLoading(true);
     try {
-      await ApiService.forgotPassword(forgotEmail.trim(), forgotOtp.trim(), forgotNewPassword);
-      showToast('Master key successfully reset! You can now log in.', 'success', 'Master Key Updated');
+      const res = await ApiService.forgotPassword(forgotEmail.trim(), forgotOtp.trim(), forgotNewPassword);
+      showToast(
+        res.message || 'Master key successfully reset! You can now log in.',
+        'success',
+        'Master Key Updated'
+      );
       setAuthMode('login');
       setLoginUsername(forgotEmail.trim());
       setLoginPassword(forgotNewPassword);
       setForgotOtp('');
       setOtpSent(false);
+      setResendCooldown(0);
     } catch (err) {
-      showToast(err.message, 'error', 'Reset Failed');
+      showToast(err.message || 'Failed to reset master key.', 'error', 'Reset Failed');
     } finally {
       setLoading(false);
     }
@@ -192,6 +215,7 @@ export const AuthModal = () => {
     setAuthMode(mode);
     setOtpSent(false);
     setForgotOtp('');
+    setResendCooldown(0);
   };
 
   const showcaseSlides = [
@@ -230,7 +254,7 @@ export const AuthModal = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-[#05070d] text-slate-100 flex flex-col justify-between p-4 sm:p-6 md:p-10 selection:bg-sky-500/30 selection:text-sky-300">
+    <div className="min-h-screen min-h-[100dvh] bg-[#05070d] text-slate-100 flex flex-col justify-between p-3 sm:p-6 md:p-10 selection:bg-sky-500/30 selection:text-sky-300 overflow-y-auto">
       
       {/* Background Decorative Glow Gradients */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
@@ -239,7 +263,7 @@ export const AuthModal = () => {
       </div>
 
       {/* Main Container - Split Screen on Desktop (Instagram Style) */}
-      <div className="max-w-5xl w-full mx-auto my-auto grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+      <div className="max-w-5xl w-full mx-auto my-auto grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center py-4 sm:py-6">
         
         {/* ================= LEFT COLUMN: INSTAGRAM-STYLE SMARTPHONE / FEATURE SHOWCASE ================= */}
         <div className="hidden lg:flex lg:col-span-6 flex-col items-center justify-center p-4">
@@ -336,7 +360,7 @@ export const AuthModal = () => {
         <div className="lg:col-span-6 w-full max-w-md mx-auto space-y-4">
           
           {/* Main Instagram Box */}
-          <div className="glass-panel p-8 relative border border-slate-700/60 bg-[#0d1322]/90 shadow-2xl shadow-sky-500/5">
+          <div className="glass-panel p-5 sm:p-8 relative border border-slate-700/60 bg-[#0d1322]/90 shadow-2xl shadow-sky-500/5 rounded-2xl">
             
             {/* Instagram Style Brand Header */}
             <div className="text-center mb-6">
@@ -346,10 +370,10 @@ export const AuthModal = () => {
               <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-100 tracking-tight font-serif italic">
                 CipherVault
               </h1>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs sm:text-sm text-slate-400 mt-1">
                 Zero-Knowledge Hybrid Cryptography Storage
               </p>
-              <div className="text-[11px] text-sky-400/90 font-medium mt-0.5">
+              <div className="text-[11px] sm:text-xs text-sky-400/90 font-medium mt-0.5">
                 Lead Architect: Devansh Rathore
               </div>
             </div>
@@ -369,12 +393,12 @@ export const AuthModal = () => {
                           clearAllSavedAccounts();
                         }
                       }}
-                      className="text-[10px] text-rose-400 hover:text-rose-300 hover:underline flex items-center gap-1 transition"
+                      className="text-[10px] sm:text-xs text-rose-400 hover:text-rose-300 hover:underline flex items-center gap-1 transition p-1"
                       title="Erase all saved login info"
                     >
                       <Trash2 className="w-3 h-3" /> Clear Info
                     </button>
-                    <span className="text-[10px] text-slate-500 font-mono">({savedAccounts.length})</span>
+                    <span className="text-[10px] sm:text-xs text-slate-500 font-mono">({savedAccounts.length})</span>
                   </div>
                 </div>
 
@@ -424,11 +448,11 @@ export const AuthModal = () => {
                 <form onSubmit={handleLoginSubmit} className="space-y-4">
                   {/* Username / Email Input */}
                   <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                    <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
                       Username or Email
                     </label>
                     <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
                         <UserIcon className="w-4 h-4" />
                       </div>
                       <input
@@ -436,7 +460,7 @@ export const AuthModal = () => {
                         required
                         value={loginUsername}
                         onChange={(e) => setLoginUsername(e.target.value)}
-                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-900/90 border border-slate-700 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 transition"
+                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-900/90 border border-slate-700 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
                         placeholder="e.g. devansh or user@company.com"
                       />
                     </div>
@@ -445,19 +469,19 @@ export const AuthModal = () => {
                   {/* Password Input with Show/Hide Eye */}
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-xs font-medium text-slate-300">
+                      <label className="text-xs sm:text-sm font-medium text-slate-300">
                         Master Password / Key
                       </label>
                       <button
                         type="button"
                         onClick={() => switchMode('forgot_password')}
-                        className="text-[11px] text-sky-400 hover:underline hover:text-sky-300 font-medium"
+                        className="text-xs text-sky-400 hover:underline hover:text-sky-300 font-medium py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-sky-400 rounded min-h-[32px] flex items-center"
                       >
                         Forgot Master Key?
                       </button>
                     </div>
                     <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
                         <Lock className="w-4 h-4" />
                       </div>
                       <input
@@ -465,14 +489,15 @@ export const AuthModal = () => {
                         required
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
-                        className="w-full pl-9 pr-10 py-2.5 bg-slate-900/90 border border-slate-700 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 transition"
+                        className="w-full pl-10 pr-12 py-2.5 bg-slate-900/90 border border-slate-700 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
                         placeholder="••••••••••••"
                       />
                       <button
                         type="button"
                         onClick={() => setShowLoginPassword(!showLoginPassword)}
-                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
+                        className="absolute inset-y-0 right-0 w-11 h-full flex items-center justify-center text-slate-400 hover:text-slate-200 focus:outline-none"
                         title={showLoginPassword ? 'Hide password' : 'Show password'}
+                        aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
                       >
                         {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
@@ -483,7 +508,7 @@ export const AuthModal = () => {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:via-blue-500 hover:to-indigo-500 text-white text-sm font-semibold shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60"
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-400 hover:via-blue-500 hover:to-indigo-500 text-white text-sm sm:text-base font-semibold shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60 min-h-[44px]"
                   >
                     {loading ? (
                       <>
@@ -524,10 +549,10 @@ export const AuthModal = () => {
                       type="button"
                       onClick={() => handle1ClickLogin(acc.user)}
                       disabled={loading}
-                      className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center justify-between hover:opacity-80 transition disabled:opacity-50 ${acc.color}`}
+                      className={`px-3 py-2 rounded-lg border text-xs font-medium flex items-center justify-between hover:opacity-80 transition disabled:opacity-50 min-h-[40px] ${acc.color}`}
                     >
                       <span>{acc.name}</span>
-                      <Zap className="w-3 h-3" />
+                      <Zap className="w-3.5 h-3.5" />
                     </button>
                   ))}
                 </div>
@@ -538,93 +563,95 @@ export const AuthModal = () => {
             {authMode === 'register' && (
               <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="text-xs sm:text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                     <Sparkles className="w-4 h-4 text-emerald-400" /> New Account & RSA Keypair
                   </span>
                   <button
                     type="button"
                     onClick={() => switchMode('login')}
-                    className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1"
+                    className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 p-2 rounded-lg hover:bg-slate-800/50 min-h-[44px]"
                   >
-                    <ArrowLeft className="w-3 h-3" /> Back
+                    <ArrowLeft className="w-3.5 h-3.5" /> Back
                   </button>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Username</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1">Username</label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
-                      <UserIcon className="w-3.5 h-3.5" />
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                      <UserIcon className="w-4 h-4" />
                     </div>
                     <input
                       type="text"
                       required
                       value={regUsername}
                       onChange={(e) => setRegUsername(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                      className="w-full pl-10 pr-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
                       placeholder="e.g. devansh_security"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Full Name</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1">Full Name</label>
                   <input
                     type="text"
                     value={regFullName}
                     onChange={(e) => setRegFullName(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                    className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
                     placeholder="Devansh Rathore"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Registered Email</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1">Registered Email</label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
-                      <Mail className="w-3.5 h-3.5" />
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                      <Mail className="w-4 h-4" />
                     </div>
                     <input
                       type="email"
                       required
                       value={regEmail}
                       onChange={(e) => setRegEmail(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                      className="w-full pl-10 pr-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
                       placeholder="devansh@ciphervault.io"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Master Password / Key</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1">Master Password / Key</label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
-                      <Lock className="w-3.5 h-3.5" />
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                      <Lock className="w-4 h-4" />
                     </div>
                     <input
                       type={showRegPassword ? 'text' : 'password'}
                       required
                       value={regPassword}
                       onChange={(e) => setRegPassword(e.target.value)}
-                      className="w-full pl-9 pr-10 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                      className="w-full pl-10 pr-12 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
                       placeholder="Min 6 characters (Derives 100k PBKDF2 Envelope)"
                     />
                     <button
                       type="button"
                       onClick={() => setShowRegPassword(!showRegPassword)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
+                      className="absolute inset-y-0 right-0 w-11 h-full flex items-center justify-center text-slate-400 hover:text-slate-200 focus:outline-none"
+                      title={showRegPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showRegPassword ? 'Hide password' : 'Show password'}
                     >
-                      {showRegPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Role</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1">Role</label>
                   <select
                     value={regRole}
                     onChange={(e) => setRegRole(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                    className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-base sm:text-sm text-slate-100 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
                   >
                     <option value="user">Standard User</option>
                     <option value="admin">Administrator</option>
@@ -635,7 +662,7 @@ export const AuthModal = () => {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-2.5 mt-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60"
+                  className="w-full py-3 mt-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white text-sm sm:text-base font-semibold shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60 min-h-[44px]"
                 >
                   {loading ? (
                     <>
@@ -654,100 +681,136 @@ export const AuthModal = () => {
 
             {/* ---------------- 3. FORGOT MASTER KEY MODE (EMAIL OTP VERIFICATION) ---------------- */}
             {authMode === 'forgot_password' && (
-              <form onSubmit={handleForgotPasswordSubmit} className="space-y-3.5">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+              <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs sm:text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                     <KeyRound className="w-4 h-4 text-sky-400" /> Reset Master Key
                   </span>
                   <button
                     type="button"
                     onClick={() => switchMode('login')}
-                    className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1"
+                    className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 p-2 rounded-lg hover:bg-slate-800/50 min-h-[44px]"
                   >
-                    <ArrowLeft className="w-3 h-3" /> Back
+                    <ArrowLeft className="w-3.5 h-3.5" /> Back
                   </button>
                 </div>
 
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Enter your registered email address. We will dispatch a secure 6-digit verification code to reset your master key and re-envelope your RSA keys.
-                </p>
+                {/* Zero-Knowledge Security Notice Banner */}
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs sm:text-xs flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0 text-amber-400 mt-0.5" />
+                  <div className="leading-relaxed">
+                    <strong className="text-amber-200">Zero-Knowledge Notice:</strong> Resetting your master key initializes a fresh 2048-bit RSA keypair. Files previously encrypted under your old key cannot be decrypted without your original master key.
+                  </div>
+                </div>
 
+                {/* Email Field and Send/Resend Button - Stacks vertically on phones, side-by-side on sm+ */}
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Registered Email Address</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="email"
-                      required
-                      value={forgotEmail}
-                      onChange={(e) => setForgotEmail(e.target.value)}
-                      className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-sky-400"
-                      placeholder="e.g. devansh@ciphervault.io"
-                    />
+                  <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1.5">Registered Email Address</label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <input
+                        type="email"
+                        required
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
+                        placeholder="e.g. devansh@ciphervault.io"
+                      />
+                    </div>
                     <button
                       type="button"
                       onClick={handleSendForgotOtp}
-                      disabled={otpSending}
-                      className="px-3 py-2 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium flex items-center gap-1 transition whitespace-nowrap"
+                      disabled={otpSending || resendCooldown > 0}
+                      className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition whitespace-nowrap min-h-[44px] disabled:opacity-50"
                     >
-                      {otpSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                      <span>{otpSent ? 'Resend' : 'Send Code'}</span>
+                      {otpSending ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                      <span>
+                        {otpSending
+                          ? 'Sending...'
+                          : resendCooldown > 0
+                          ? `Resend in ${resendCooldown}s`
+                          : otpSent
+                          ? 'Resend Code'
+                          : 'Send Code'}
+                      </span>
                     </button>
                   </div>
                 </div>
 
+                {/* OTP Field - Empty initial state, numeric inputmode, no hardcoded values */}
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                  <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1.5">
                     6-Digit Verification Code {otpSent && <span className="text-emerald-400 font-semibold">(Sent to Email)</span>}
                   </label>
                   <input
                     type="text"
                     required
                     maxLength={6}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]*"
                     value={forgotOtp}
-                    onChange={(e) => setForgotOtp(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 font-mono tracking-widest text-center focus:outline-none focus:border-sky-400"
-                    placeholder="123456"
+                    onChange={(e) => setForgotOtp(e.target.value.replace(/\D/g, ''))}
+                    className="w-full px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-base sm:text-lg text-slate-100 font-mono tracking-[0.3em] text-center focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
+                    placeholder="••••••"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">New Master Password / Key</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1.5">New Master Password / Key</label>
                   <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                      <Lock className="w-4 h-4" />
+                    </div>
                     <input
                       type={showForgotNewPassword ? 'text' : 'password'}
                       required
                       value={forgotNewPassword}
                       onChange={(e) => setForgotNewPassword(e.target.value)}
-                      className="w-full px-3 pr-9 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                      className="w-full pl-10 pr-12 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
                       placeholder="Min 6 characters"
                     />
                     <button
                       type="button"
                       onClick={() => setShowForgotNewPassword(!showForgotNewPassword)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
+                      className="absolute inset-y-0 right-0 w-11 h-full flex items-center justify-center text-slate-400 hover:text-slate-200 focus:outline-none"
+                      title={showForgotNewPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showForgotNewPassword ? 'Hide password' : 'Show password'}
                     >
-                      {showForgotNewPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      {showForgotNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Confirm New Master Key</label>
+                  <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-1.5">Confirm New Master Key</label>
                   <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                      <Lock className="w-4 h-4" />
+                    </div>
                     <input
                       type={showForgotConfirmPassword ? 'text' : 'password'}
                       required
                       value={forgotConfirmPassword}
                       onChange={(e) => setForgotConfirmPassword(e.target.value)}
-                      className="w-full px-3 pr-9 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                      className="w-full pl-10 pr-12 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 min-h-[44px] transition"
                       placeholder="••••••••••••"
                     />
                     <button
                       type="button"
                       onClick={() => setShowForgotConfirmPassword(!showForgotConfirmPassword)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
+                      className="absolute inset-y-0 right-0 w-11 h-full flex items-center justify-center text-slate-400 hover:text-slate-200 focus:outline-none"
+                      title={showForgotConfirmPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showForgotConfirmPassword ? 'Hide password' : 'Show password'}
                     >
-                      {showForgotConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      {showForgotConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
@@ -755,16 +818,16 @@ export const AuthModal = () => {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white text-xs font-semibold shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60"
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white text-sm sm:text-base font-semibold shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2 transition disabled:opacity-60 min-h-[44px]"
                 >
                   {loading ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Verifying & Re-encrypting Key Envelope...</span>
+                      <span>Generating Fresh Keypair & Vault...</span>
                     </>
                   ) : (
                     <>
-                      <span>Reset Master Key & Update Envelope</span>
+                      <span>Reset Master Key & Generate Fresh Keypair</span>
                       <Lock className="w-4 h-4" />
                     </>
                   )}
@@ -775,36 +838,36 @@ export const AuthModal = () => {
           </div>
 
           {/* Secondary Instagram Switch Box */}
-          <div className="glass-panel p-4 text-center border border-slate-700/60 bg-[#0d1322]/90 text-xs text-slate-300">
+          <div className="glass-panel p-4 text-center border border-slate-700/60 bg-[#0d1322]/90 text-xs sm:text-sm text-slate-300 rounded-2xl">
             {authMode === 'login' ? (
-              <div>
-                Don't have an account?{' '}
+              <div className="flex items-center justify-center flex-wrap gap-1">
+                <span>Don't have an account?</span>
                 <button
                   type="button"
                   onClick={() => switchMode('register')}
-                  className="text-sky-400 hover:underline font-bold ml-1 hover:text-sky-300"
+                  className="text-sky-400 hover:underline font-bold hover:text-sky-300 p-1 min-h-[44px] inline-flex items-center"
                 >
                   Sign up
                 </button>
               </div>
             ) : authMode === 'register' ? (
-              <div>
-                Have an account?{' '}
+              <div className="flex items-center justify-center flex-wrap gap-1">
+                <span>Have an account?</span>
                 <button
                   type="button"
                   onClick={() => switchMode('login')}
-                  className="text-sky-400 hover:underline font-bold ml-1 hover:text-sky-300"
+                  className="text-sky-400 hover:underline font-bold hover:text-sky-300 p-1 min-h-[44px] inline-flex items-center"
                 >
                   Log in
                 </button>
               </div>
             ) : (
-              <div>
-                Remembered your password?{' '}
+              <div className="flex items-center justify-center flex-wrap gap-1">
+                <span>Remembered your password?</span>
                 <button
                   type="button"
                   onClick={() => switchMode('login')}
-                  className="text-sky-400 hover:underline font-bold ml-1 hover:text-sky-300"
+                  className="text-sky-400 hover:underline font-bold hover:text-sky-300 p-1 min-h-[44px] inline-flex items-center"
                 >
                   Back to Log in
                 </button>

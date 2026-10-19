@@ -1,9 +1,9 @@
 import secrets
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import hashlib
+import hmac
+import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, List
 import bcrypt
 import jwt
 from jwt.exceptions import PyJWTError
@@ -14,6 +14,7 @@ from fastapi.security import OAuth2PasswordBearer
 from app.config import settings
 from app.database import get_db
 from app.models.user import User
+from app.models.otp import OTPRecord
 from app.schemas.auth import (
     UserRegisterRequest, 
     UserLoginRequest, 
@@ -24,11 +25,10 @@ from app.schemas.auth import (
 )
 from app.crypto.engine import HybridCryptoEngine, DecryptionError
 from app.services.audit_service import AuditService
+from app.services.email_service import EmailService
 
+logger = logging.getLogger("ciphervault.auth")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-
-# In-Memory OTP Store: key = f"{email}:{purpose}" -> {"otp": "123456", "expires_at": datetime, "verified": bool}
-_OTP_STORE: Dict[str, dict] = {}
 
 class AuthService:
     
@@ -65,71 +65,117 @@ class AuthService:
     ) -> dict:
         """
         Generates and dispatches a cryptographically secure 6-digit OTP for email verification.
+        Uses anti-enumeration generic responses, 60s cooldown, rate limiting, and secure hashing.
         """
         email_clean = req.email.strip().lower()
         purpose = req.purpose.strip().lower()
+        now = datetime.now(timezone.utc)
 
         existing_user = db.query(User).filter(User.email == email_clean).first()
-        if purpose == "forgot_password":
-            if not existing_user:
+        
+        # Anti-enumeration: If user not found for password reset, return generic response without leaking existence
+        if purpose == "forgot_password" and not existing_user:
+            logger.info(f"OTP requested for non-existent email '{email_clean}' - returning generic anti-enumeration response.")
+            return {
+                "message": "If this email is registered, a 6-digit verification code has been sent.",
+                "email": email_clean,
+                "purpose": purpose,
+                "expires_in_seconds": 600,
+                "resend_cooldown_seconds": 60
+            }
+
+        if purpose == "register" and existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Email '{email_clean}' is already registered."
+            )
+
+        # 1. Enforce 60-second resend cooldown per (email, purpose)
+        cooldown_threshold = now - timedelta(seconds=60)
+        recent_otp = db.query(OTPRecord).filter(
+            OTPRecord.email == email_clean,
+            OTPRecord.purpose == purpose,
+            OTPRecord.created_at >= cooldown_threshold
+        ).order_by(OTPRecord.created_at.desc()).first()
+
+        if recent_otp:
+            created = recent_otp.created_at if recent_otp.created_at.tzinfo else recent_otp.created_at.replace(tzinfo=timezone.utc)
+            elapsed = (now - created).total_seconds()
+            remaining = max(1, int(60 - elapsed))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Please wait {remaining} seconds before requesting another verification code."
+            )
+
+        # 2. Rate limit: Max 5 requests per hour per email
+        one_hour_ago = now - timedelta(hours=1)
+        email_req_count = db.query(OTPRecord).filter(
+            OTPRecord.email == email_clean,
+            OTPRecord.created_at >= one_hour_ago
+        ).count()
+        if email_req_count >= 5:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many verification requests for this email address. Please try again in an hour."
+            )
+
+        # 3. Rate limit: Max 10 requests per hour per IP
+        if ip_address:
+            ip_req_count = db.query(OTPRecord).filter(
+                OTPRecord.ip_address == ip_address,
+                OTPRecord.created_at >= one_hour_ago
+            ).count()
+            if ip_req_count >= 10:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"No account found associated with email '{email_clean}'."
-                )
-        elif purpose == "register":
-            if existing_user:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Email '{email_clean}' is already registered."
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too many verification requests from your network. Please try again later."
                 )
 
-        # Generate 6-digit random code
+        # 4. Invalidate any previous unused OTPs for this (email, purpose)
+        db.query(OTPRecord).filter(
+            OTPRecord.email == email_clean,
+            OTPRecord.purpose == purpose,
+            OTPRecord.used == False
+        ).update({"used": True}, synchronize_session=False)
+        db.commit()
+
+        # 5. Generate secure 6-digit random code and hash it
         otp_code = f"{secrets.randbelow(900000) + 100000}"
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        otp_hash = hashlib.sha256(otp_code.encode("utf-8")).hexdigest()
+        expires_at = now + timedelta(minutes=10)
 
-        store_key = f"{email_clean}:{purpose}"
-        _OTP_STORE[store_key] = {
-            "otp": otp_code,
-            "expires_at": expires_at,
-            "verified": False
-        }
+        # 6. Dispatch real email via EmailService BEFORE saving or returning
+        try:
+            EmailService.send_otp_email(to_email=email_clean, otp_code=otp_code, expiry_minutes=10)
+        except RuntimeError as r_err:
+            logger.error(f"Email service error: {r_err}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Email delivery service is unconfigured on the server. Please contact administrator."
+            )
+        except Exception as e_err:
+            logger.error(f"SMTP dispatch failed to '{email_clean}': {e_err}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to deliver verification code email. Please check server SMTP configuration or try again later."
+            )
 
-        # Dispatch real email if SMTP is configured
-        email_sent = False
-        if settings.SMTP_HOST and settings.SMTP_USER and settings.SMTP_PASSWORD:
-            try:
-                msg = MIMEMultipart("alternative")
-                msg["Subject"] = f"CipherVault Security: Your Verification Code is {otp_code}"
-                msg["From"] = settings.SMTP_FROM_EMAIL
-                msg["To"] = email_clean
+        # 7. Store hashed OTP record in database
+        otp_record = OTPRecord(
+            email=email_clean,
+            purpose=purpose,
+            otp_hash=otp_hash,
+            expires_at=expires_at,
+            attempts=0,
+            used=False,
+            last_sent_at=now,
+            ip_address=ip_address,
+            created_at=now
+        )
+        db.add(otp_record)
+        db.commit()
 
-                text_content = f"CipherVault Verification Code: {otp_code}\nValid for 10 minutes. If you did not request this, please ignore."
-                html_content = f"""
-                <div style="font-family: Arial, sans-serif; background-color: #07090e; color: #f8fafc; padding: 24px; border-radius: 12px; border: 1px solid #38bdf8;">
-                    <h2 style="color: #38bdf8; margin-top: 0;">CipherVault Zero-Knowledge Security</h2>
-                    <p style="font-size: 14px; color: #94a3b8;">Use the verification code below to complete your master key reset:</p>
-                    <div style="background-color: #0d121d; border: 1px solid #38bdf8; border-radius: 8px; padding: 16px; text-align: center; margin: 20px 0;">
-                        <span style="font-family: monospace; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #38bdf8;">{otp_code}</span>
-                    </div>
-                    <p style="font-size: 12px; color: #64748b;">This code is valid for 10 minutes. Architected by Devansh Rathore.</p>
-                </div>
-                """
-                msg.attach(MIMEText(text_content, "plain"))
-                msg.attach(MIMEText(html_content, "html"))
-
-                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
-                    if settings.SMTP_USE_TLS:
-                        server.starttls()
-                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                    server.send_message(msg)
-                email_sent = True
-                print(f"[+] Successfully delivered OTP email to {email_clean} via SMTP {settings.SMTP_HOST}")
-            except Exception as e:
-                print(f"[!] SMTP dispatch error to {email_clean}: {e}")
-        else:
-            print(f"[*] [EMAIL OTP DISPATCH] Delivered 6-digit OTP [{otp_code}] to registered email: {email_clean} (Purpose: {purpose})")
-
-        # Log event in SIEM audit trail
+        # 8. Log in SIEM audit trail
         AuditService.log_event(
             db=db,
             action="OTP_GENERATED_DISPATCHED",
@@ -138,15 +184,15 @@ class AuthService:
             target_id=email_clean,
             status="SUCCESS",
             ip_address=ip_address,
-            details=f"Generated 6-digit OTP for email verification (Purpose: {purpose}). Valid for 10 minutes. Delivered via SMTP: {email_sent}"
+            details=f"Generated and delivered 6-digit OTP for {email_clean} (Purpose: {purpose}). Valid for 10 minutes."
         )
 
         return {
-            "message": f"Verification code sent to {email_clean}. Please check your email and enter the 6-digit code.",
+            "message": "If this email is registered, a 6-digit verification code has been sent.",
             "email": email_clean,
             "purpose": purpose,
-            "otp_code": otp_code,  # Available for fallback display if SMTP server is unconfigured
-            "expires_in_seconds": 600
+            "expires_in_seconds": 600,
+            "resend_cooldown_seconds": 60
         }
 
     @classmethod
@@ -157,44 +203,62 @@ class AuthService:
         ip_address: Optional[str] = None
     ) -> dict:
         """
-        Verifies the 6-digit email OTP.
+        Verifies the 6-digit email OTP using constant-time hash comparison and max-attempt limiting.
         """
         email_clean = req.email.strip().lower()
         purpose = req.purpose.strip().lower()
-        store_key = f"{email_clean}:{purpose}"
-
-        record = _OTP_STORE.get(store_key)
         now = datetime.now(timezone.utc)
+
+        record = db.query(OTPRecord).filter(
+            OTPRecord.email == email_clean,
+            OTPRecord.purpose == purpose,
+            OTPRecord.used == False
+        ).order_by(OTPRecord.created_at.desc()).first()
 
         if not record:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No verification code found. Please request a new code."
+                detail="No active verification code found. Please request a new code."
             )
 
-        if now > record["expires_at"]:
-            _OTP_STORE.pop(store_key, None)
+        exp = record.expires_at if record.expires_at.tzinfo else record.expires_at.replace(tzinfo=timezone.utc)
+        if now > exp:
+            record.used = True
+            db.commit()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Verification code has expired. Please request a new one."
             )
 
-        if record["otp"] != req.otp.strip():
-            AuditService.log_event(
-                db=db,
-                action="OTP_VERIFY_FAILED",
-                target_type="EMAIL_OTP",
-                target_id=email_clean,
-                status="FAILURE",
-                ip_address=ip_address,
-                details=f"Invalid OTP entered for {email_clean} (Purpose: {purpose})"
-            )
+        if record.attempts >= 5:
+            record.used = True
+            db.commit()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid verification code. Please check and try again."
+                detail="Maximum verification attempts exceeded. Please request a new code."
             )
 
-        record["verified"] = True
+        record.attempts += 1
+        provided_hash = hashlib.sha256(req.otp.strip().encode("utf-8")).hexdigest()
+        
+        # Constant-time comparison
+        if not hmac.compare_digest(provided_hash, record.otp_hash):
+            db.commit()
+            remaining = 5 - record.attempts
+            if remaining > 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid verification code. {remaining} attempt(s) remaining."
+                )
+            else:
+                record.used = True
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Maximum verification attempts exceeded. Please request a new code."
+                )
+
+        db.commit()
 
         AuditService.log_event(
             db=db,
@@ -220,25 +284,61 @@ class AuthService:
         ip_address: Optional[str] = None
     ) -> dict:
         """
-        Resets user password using verified OTP and regenerates/re-envelopes their RSA keypair.
+        Resets user password using verified OTP and regenerates their 2048-bit RSA keypair.
+        In a zero-knowledge architecture, forgotten master passwords mean the old envelope is
+        mathematically unrecoverable; thus a fresh keypair is securely generated and wrapped.
         """
         email_clean = req.email.strip().lower()
-        store_key = f"{email_clean}:forgot_password"
-        record = _OTP_STORE.get(store_key)
+        now = datetime.now(timezone.utc)
 
-        # Verify OTP
-        if not record or record.get("otp") != req.otp.strip():
+        record = db.query(OTPRecord).filter(
+            OTPRecord.email == email_clean,
+            OTPRecord.purpose == "forgot_password",
+            OTPRecord.used == False
+        ).order_by(OTPRecord.created_at.desc()).first()
+
+        if not record:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or missing verification code. Please request a new code."
+                detail="No active verification code found. Please request a new code."
             )
 
-        if datetime.now(timezone.utc) > record["expires_at"]:
-            _OTP_STORE.pop(store_key, None)
+        exp = record.expires_at if record.expires_at.tzinfo else record.expires_at.replace(tzinfo=timezone.utc)
+        if now > exp:
+            record.used = True
+            db.commit()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Verification code has expired. Please request a new one."
             )
+
+        if record.attempts >= 5:
+            record.used = True
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Maximum verification attempts exceeded. Please request a new code."
+            )
+
+        record.attempts += 1
+        provided_hash = hashlib.sha256(req.otp.strip().encode("utf-8")).hexdigest()
+
+        # Constant-time comparison
+        if not hmac.compare_digest(provided_hash, record.otp_hash):
+            db.commit()
+            remaining = 5 - record.attempts
+            if remaining > 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid verification code. {remaining} attempt(s) remaining."
+                )
+            else:
+                record.used = True
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Maximum verification attempts exceeded. Please request a new code."
+                )
 
         user = db.query(User).filter(User.email == email_clean).first()
         if not user:
@@ -247,10 +347,13 @@ class AuthService:
                 detail="User account not found."
             )
 
-        # 1. Update Password Hash
+        # Invalidate OTP immediately upon successful verification
+        record.used = True
+
+        # 1. Update Password Hash with new bcrypt salt
         user.password_hash = cls.hash_password(req.new_password)
 
-        # 2. Generate and envelope a fresh 2048-bit RSA keypair with the new master password
+        # 2. Zero-Knowledge Reset: Generate and envelope a brand-new 2048-bit RSA keypair
         priv_pem, pub_pem = HybridCryptoEngine.generate_rsa_keypair(key_size=settings.RSA_KEY_SIZE)
         enc_priv_hex, salt_hex, iv_hex, tag_hex = HybridCryptoEngine.wrap_private_key(
             priv_pem, req.new_password
@@ -265,9 +368,6 @@ class AuthService:
         db.commit()
         db.refresh(user)
 
-        # Clear used OTP
-        _OTP_STORE.pop(store_key, None)
-
         AuditService.log_event(
             db=db,
             action="PASSWORD_RESET_SUCCESS",
@@ -277,12 +377,13 @@ class AuthService:
             target_id=user.id,
             status="SUCCESS",
             ip_address=ip_address,
-            details=f"Master password reset via verified Email OTP. Fresh 2048-bit RSA envelope initialized."
+            details="Master password reset via verified Email OTP. Fresh 2048-bit RSA keypair initialized."
         )
 
         return {
             "success": True,
-            "message": "Password successfully reset! You can now log in with your new password."
+            "message": "Master key successfully reset. A new 2048-bit RSA keypair has been generated. Note: Previously encrypted files cannot be decrypted without your old master key.",
+            "username": user.username
         }
 
     @classmethod
@@ -312,14 +413,38 @@ class AuthService:
 
         # Optional OTP verification check if OTP was provided
         if req.otp:
-            store_key = f"{email_clean}:register"
-            record = _OTP_STORE.get(store_key)
-            if not record or record.get("otp") != req.otp.strip():
+            record = db.query(OTPRecord).filter(
+                OTPRecord.email == email_clean,
+                OTPRecord.purpose == "register",
+                OTPRecord.used == False
+            ).order_by(OTPRecord.created_at.desc()).first()
+
+            if not record:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or expired email verification OTP code."
+                )
+
+            exp = record.expires_at if record.expires_at.tzinfo else record.expires_at.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) > exp:
+                record.used = True
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Verification code has expired. Please request a new one."
+                )
+
+            provided_hash = hashlib.sha256(req.otp.strip().encode("utf-8")).hexdigest()
+            if not hmac.compare_digest(provided_hash, record.otp_hash):
+                record.attempts += 1
+                db.commit()
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid email verification OTP code."
                 )
-            _OTP_STORE.pop(store_key, None)
+
+            record.used = True
+            db.commit()
 
         # 1. Hash Password
         password_hash = cls.hash_password(req.password)

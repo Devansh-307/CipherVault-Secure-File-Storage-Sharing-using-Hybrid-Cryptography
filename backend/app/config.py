@@ -1,10 +1,26 @@
 import os
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = BASE_DIR.parent
+
+# Load .env file from project root or backend directory if present
+for env_file in [PROJECT_ROOT / ".env", BASE_DIR / ".env"]:
+    if env_file.exists():
+        load_dotenv(env_file)
+        break
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(PROJECT_ROOT / ".env") if (PROJECT_ROOT / ".env").exists() else (str(BASE_DIR / ".env") if (BASE_DIR / ".env").exists() else None),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False
+    )
+
+    DEBUG: bool = False
     PROJECT_NAME: str = "CipherVault - Hybrid Cryptography Storage"
     PROJECT_VERSION: str = "1.0.0"
     API_V1_STR: str = "/api"
@@ -30,16 +46,15 @@ class Settings(BaseSettings):
     # Security parameters
     PBKDF2_ITERATIONS: int = 100_000
 
-    # Email / SMTP Configuration (Optional: for live email dispatch)
-    SMTP_HOST: str = os.environ.get("SMTP_HOST", "")
-    SMTP_PORT: int = int(os.environ.get("SMTP_PORT", 587))
-    SMTP_USER: str = os.environ.get("SMTP_USER", "")
-    SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
-    SMTP_FROM_EMAIL: str = os.environ.get("SMTP_FROM_EMAIL", "security@ciphervault.io")
+    # Email / SMTP Configuration (Defaults to Gmail SMTP)
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    MAIL_FROM: str = "security@ciphervault.io"
+    SMTP_FROM_EMAIL: str = "security@ciphervault.io"
     SMTP_USE_TLS: bool = True
-    
-    class Config:
-        case_sensitive = True
+    SMTP_USE_SSL: bool = False
 
 settings = Settings()
 

@@ -3,6 +3,7 @@ from app.services.file_service import FileService
 from app.services.share_service import ShareService
 from app.services.storage_service import StorageService
 from app.services.audit_service import AuditService
+from app.services.email_service import EmailService
 
 __all__ = [
     "AuthService",
@@ -10,5 +11,6 @@ __all__ = [
     "FileService",
     "ShareService",
     "StorageService",
-    "AuditService"
+    "AuditService",
+    "EmailService"
 ]

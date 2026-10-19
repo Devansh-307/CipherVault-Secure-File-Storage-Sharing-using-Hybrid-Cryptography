@@ -23,7 +23,7 @@ export const ToastProvider = ({ children }) => {
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-md w-full pointer-events-none">
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 sm:top-auto sm:bottom-6 sm:right-6 sm:left-auto sm:translate-x-0 z-50 flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm pointer-events-none">
         {toasts.map((toast) => {
           const isError = toast.type === 'error';
           const isSuccess = toast.type === 'success';
@@ -33,7 +33,7 @@ export const ToastProvider = ({ children }) => {
           return (
             <div
               key={toast.id}
-              className={`pointer-events-auto p-4 rounded-xl bg-[#0f172a]/95 border ${borderColor} text-slate-100 shadow-2xl backdrop-blur-md flex items-start gap-3 animate-in fade-in slide-in-from-right-5 duration-200`}
+              className={`pointer-events-auto p-3.5 sm:p-4 rounded-xl bg-[#0f172a]/95 border ${borderColor} text-slate-100 shadow-2xl backdrop-blur-md flex items-start gap-3 animate-in fade-in slide-in-from-top-4 sm:slide-in-from-right-5 duration-200`}
             >
               {isError ? (
                 <AlertTriangle className={`w-5 h-5 flex-shrink-0 ${iconColor} mt-0.5`} />
@@ -44,11 +44,12 @@ export const ToastProvider = ({ children }) => {
               )}
               <div className="flex-1 min-w-0">
                 {toast.title && <div className="font-semibold text-sm text-slate-200 mb-0.5">{toast.title}</div>}
-                <div className="text-xs text-slate-300 break-words leading-relaxed">{toast.message}</div>
+                <div className="text-xs sm:text-sm text-slate-300 break-words leading-relaxed">{toast.message}</div>
               </div>
               <button
                 onClick={() => removeToast(toast.id)}
-                className="text-slate-400 hover:text-slate-200 transition"
+                className="text-slate-400 hover:text-slate-200 p-1 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition focus:outline-none focus:ring-1 focus:ring-sky-400"
+                aria-label="Dismiss notification"
               >
                 <X className="w-4 h-4" />
               </button>

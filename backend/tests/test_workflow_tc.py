@@ -24,15 +24,15 @@ def override_get_db():
     finally:
         db.close()
 
-app.dependency_overrides[get_db] = override_get_db
-
 @pytest.fixture(scope="module", autouse=True)
 def setup_database():
+    app.dependency_overrides[get_db] = override_get_db
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
+    app.dependency_overrides.pop(get_db, None)
     if os.path.exists("./test_ciphervault.db"):
         try:
             os.remove("./test_ciphervault.db")
@@ -179,15 +179,26 @@ def test_tc08_login_with_incorrect_password():
     response = client.post("/api/auth/login", json={"username": "alice", "password": "BadPassword123!"})
     assert response.status_code == 401
 
-def test_tc09_forgot_password_and_email_otp_flow():
+def test_tc09_forgot_password_and_email_otp_flow(monkeypatch):
     """TC09: Verification code OTP dispatch & Forgot Password reset."""
+    captured_otps = {}
+    def mock_send_otp(to_email, otp_code, expiry_minutes=10):
+        captured_otps[to_email] = otp_code
+        return True
+
+    from app.services.email_service import EmailService
+    monkeypatch.setattr(EmailService, "send_otp_email", mock_send_otp)
+
     # 1. Send OTP for forgot password
     otp_res = client.post("/api/auth/send-otp", json={
         "email": "alice@example.com",
         "purpose": "forgot_password"
     })
     assert otp_res.status_code == 200
-    otp_code = otp_res.json()["otp_code"]
+    # Crucial security check: plaintext OTP is NEVER leaked in the API response
+    assert "otp_code" not in otp_res.json()
+    assert "alice@example.com" in captured_otps
+    otp_code = captured_otps["alice@example.com"]
     assert len(otp_code) == 6
 
     # 2. Verify OTP
